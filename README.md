@@ -438,7 +438,7 @@ module imports `hashlib`, `hmac`, `secrets`, `random` or any curve
 library, if `os.urandom` appears anywhere, or if key-derivation
 vocabulary comes back.
 
-**Layer 2 sees secrets, computes nothing with them. 2785 lines.**
+**Layer 2 sees secrets, computes nothing with them. 2840 lines.**
 [`main.py`](coresigner/main.py), [`signer.py`](coresigner/signer.py),
 [`screens.py`](coresigner/screens.py), [`qrsource.py`](coresigner/qrsource.py).
 
@@ -486,8 +486,8 @@ Core an opaque string, and the one exception is documented at the top of
 payload, which is bounded by a length cap and a charset check before any
 container code runs.
 
-**Total functional code: 3,053 lines** (6,741 with blanks/comments).
-**Test code: 8,109 lines**, none of which ships.
+**Total functional code: 3,108 lines** (6,962 with blanks/comments).
+**Test code: 8,278 lines**, none of which ships.
 **Vendored, not ours: 1,868 lines** in [`hw/vendor/`](hw/vendor/): the
 BC-UR animated-QR codec, which is Blockchain Commons' by way of
 SeedSigner and is unmodified, and SeedSigner's ST7789 display driver,

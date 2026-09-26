@@ -23,6 +23,17 @@ OS_IMAGE_URL="https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspio
 OS_IMAGE_SHA256="acff736ca7945e3b305f07cda4abdb870910e12634991da69783611756e381b3"
 OS_IMAGE_BYTES="524875608"
 OS_IMAGE_PIGEN_COMMIT="ca8aeed0ae300c2a89f55ce9617d5f96a27e99e5"
+# The key face. hw/vendor/fonts/iosevka-mono-subset.ttf is cut from this
+# file by tools/make_mono_font.py, which refuses any other. Nothing on
+# the device fetches it: the subset is committed, and this pin is here so
+# the cut can be REPEATED and the result compared byte for byte.
+# Iosevka is SIL OFL 1.1. The looped `k` is its own glyph k.cv46-21, one
+# of 40 alternates the release already carries, moved into the k slot.
+IOSEVKA_VERSION="34.8.1"
+IOSEVKA_URL="https://github.com/be5invis/Iosevka/releases/download/v34.8.1/PkgTTF-IosevkaCurly-34.8.1.zip"
+IOSEVKA_TTF="IosevkaCurly-SemiBold.ttf"
+IOSEVKA_TTF_SHA256="cb0fad8ef725e3232911eb90cfb1a3d704937ef56b7f8cb43b02b8432d1ea1eb"
+
 CORE_VERSION="31.1"
 CORE_TARBALL="bitcoin-31.1-aarch64-linux-gnu.tar.gz"
 CORE_URL="https://bitcoincore.org/bin/bitcoin-core-31.1/bitcoin-31.1-aarch64-linux-gnu.tar.gz"

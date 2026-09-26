@@ -480,23 +480,49 @@ def _strings(**kw):
 SOLO = [("a1b2c3d4", "m/84h/0h/0h")]
 QUORUM = [("a1b2c3d4", "m/48h/0h/0h/2h"), ("e5f6a7b8", "m/48h/0h/0h/2h")]
 HINT = "UP/DOWN · more outputs"
+_GOLD = tuple(int(screens.OCHRE[i:i + 2], 16) for i in (1, 3, 5))
 
-# 1. THE PAGING HINT. It was drawn only when no quorum line was, and
+
+def _has_bar(**kw):
+    """True when a review render paints a scrollbar thumb."""
+    outs = [(ADDR, Decimal("0.1"))] * 4
+    img = screens.review(240, 240, outs[:kw.pop("outputs", 4)],
+                         Decimal("0.0001"), input_total_btc=Decimal("1"),
+                         **kw)
+    px = img.load()
+    # The bar lives in the right-hand margin, clear of anything else.
+    return any(px[x, y][:3] == _GOLD
+               for x in range(img.width - 8, img.width)
+               for y in range(int(img.height * 0.16),
+                              int(img.height * 0.80)))
+
+
+# 1. THE PAGING BAR. A line of gold type said "UP/DOWN · more outputs"
+#    until 2026-09-24, and it was drawn only when no quorum line was:
 #    `main` passes cosigners for any PSBT carrying derivations, so it
-#    vanished from every paged review including single-sig ones. The
-#    scrollbar and the refusal banner remained, so nothing failed.
+#    vanished from every paged review including single-sig ones and
+#    nothing failed. Ben then cut the line itself, on the same rule he
+#    gave for the corrections screen ("just show the scroll bar if we
+#    scroll"), and one output a page needs that room for the address.
+#
+#    So the GUARANTEE is unchanged and the thing carrying it moved: a
+#    paged review must still tell you there is more, and the bar is what
+#    tells you. Checked in pixels, because the bar draws no string and a
+#    string test would pass on a screen with no bar at all.
 for label, kw in (("single-sig", {"cosigners": SOLO, "ours": "a1b2c3d4"}),
                   ("a quorum", {"quorum": (2, 3), "cosigners": QUORUM,
                                 "ours": "a1b2c3d4"}),
                   ("no derivations at all", {})):
-    if HINT in _strings(**kw):
-        ok(f"a paged review tells you to page, with {label}")
+    if _has_bar(**kw):
+        ok(f"a paged review draws its scrollbar, with {label}")
     else:
-        bad(f"a paged review with {label} never says {HINT!r}")
-if HINT not in _strings(outputs=2, cosigners=QUORUM, ours="a1b2c3d4"):
-    ok("a one-page review does not tell you to page")
+        bad(f"a paged review with {label} draws no scrollbar")
+    if HINT in _strings(**kw):
+        bad(f"the review still says {HINT!r}; the bar replaced it")
+if not _has_bar(outputs=1, cosigners=QUORUM, ours="a1b2c3d4"):
+    ok("a one-page review draws no scrollbar")
 else:
-    bad("a single page still says there are more outputs")
+    bad("a single page still draws a scrollbar")
 
 # 2. THE PATH MUST BE OURS. It fell back to the first cosigner's when
 #    ours was not among them, which printed a stranger's derivation as
@@ -671,7 +697,7 @@ else:
 # 4. AN EMPTY BOX AHEAD, while a key is being typed. A box appeared
 #    when its first character was typed, so box 2 did not exist until
 #    you had already committed to it (Ben, 2026-09-18).
-_HINT = coresigner_main.Session._type_hint(screens.modes("xprv"), 0, "xprv")
+_HINT = coresigner_main.Session._type_hint(screens.modes("xprv"), 0)
 
 
 def _boxes_drawn(text, caret):
@@ -692,17 +718,35 @@ else:
 
 # 5. The one on the grid is a ONE. Base58 has no capital I, no lowercase
 #    l, no capital O and no zero, because at this size they are each
-#    other; our type then draws the one as a bare stroke and puts the
-#    confusion back. Ben read it as a capital I (2026-09-18).
+#    other. The prose face drew the one as a bare stroke and put the
+#    confusion back, so the screen carried the sentence "1 is a one":
+#    Ben read the first cell as a capital I (2026-09-18).
+#
+#    The key face draws it with a flag and a foot, so the sentence went
+#    on 2026-09-24 and "A types" got its place back. What replaces the
+#    sentence is a MEASUREMENT: the 1 and the characters it was mistaken
+#    for must not render as the same pixels. That is the property the
+#    sentence was standing in for, and unlike the sentence it cannot be
+#    true while the screen is wrong.
 _UPPER = screens.modes("xprv")[1][1]
 _LOWER = screens.modes("xprv")[0][1]
 _absent = [c for c in "IlO0" if c in _UPPER + _LOWER]
 if _absent:
     bad(f"the key charset is not base58: it holds {_absent}")
-elif "1 is a one" not in _HINT:
-    bad(f"nothing on the key screen says the stroke is a one: {_HINT!r}")
 else:
-    ok("the key charset is base58, and the screen says the stroke is a 1")
+    ok("the key charset is base58")
+if "1 is a one" in _HINT:
+    bad(f"the key screen still spends a line on the one: {_HINT!r}")
+else:
+    ok("the key screen no longer has to explain the one")
+_grid_face = screens._mono(max(screens.MONO_FLOOR, int(240 * 0.05)))
+_one = bytes(_grid_face.getmask("1"))
+for _other in "lLiI":
+    if bytes(_grid_face.getmask(_other)) == _one:
+        bad(f"the grid draws 1 and {_other} as the same pixels")
+        break
+else:
+    ok("the grid draws 1 apart from l, L, i and I")
 
 # 6. THE CARET SITS ON THE BORDER, in ink. A gold bar inside the box
 #    took interior height the bigger type wants, and two marks stacked

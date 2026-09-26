@@ -27,6 +27,53 @@ rule is that fixed items leave; the measurements are in the commit.
 
 ## Open
 
+### E-8 BlueWallet cannot import our descriptor QR, and its own parser is why
+
+Ben scanned the public key export into BlueWallet and it hung (2026-09-24).
+Not a PSBT: the watch-only import.
+
+**Our 8-mask cycling is not the cause.** BlueWallet's scanner keys a cache
+on `sha256` of the decoded payload and drops a repeat, so all eight masks
+are one scan to it (`screen/send/ScanQRCode.tsx`, `scannedCache`/`HashIt`,
+v7.2.0). A single static QR of the same text fails the same way, and the
+new hold-a-mask press on the export screen is how a tester shows that.
+
+**The cause is BlueWallet's output-descriptor parser**, read at
+`class/wallets/abstract-wallet.ts` 314-331 and traced against our exact
+payload:
+
+- It takes the fingerprint as `secret.substring(indexOf('(')+1, xpubIndex)`
+  up to the first `/`, which on `wpkh([73c5da0a/...` is `[73c5da0a`,
+  **including the bracket**. `Buffer.from('[73c5da0a','hex')` is empty, so
+  `masterFingerprint` becomes `NaN`. The path keeps a trailing `]`.
+- It never strips `/0/*` or the `#checksum`, and `.replace(/\(|\)/, '')`
+  has no `g` flag so it removes one bracket. The string reaching
+  `b58.decode` still holds `/ 0 * # l` and **throws**.
+- `wo1.setSecret(text)` in `class/wallet-import.ts:364` is not inside a
+  try/catch, so the throw escapes the import generator after it has
+  yielded `progress: 'watch only'`. That is the hang: no error is ever
+  shown because nothing catches it.
+- On TESTNET it is worse. `xpubIndex` is
+  `Math.max(indexOf('xpub'), indexOf('ypub'), indexOf('zpub'))`, and
+  `tpub` is in none of them, so the index is -1 and every value derived
+  from it is nonsense.
+
+**`UR:CRYPTO-OUTPUT` does not help.** BlueWallet decodes it with
+`CryptoOutput.fromCBOR(...).toString()`, which hands the same descriptor
+string to the same parser (`blue_modules/ur/index.js:285`).
+
+**`UR:CRYPTO-ACCOUNT` is the one path that works.** Its decoder builds the
+zpub itself from the CBOR key, with the right version bytes and the
+origin path (`blue_modules/ur/index.js:228`). BCR-2020-015.
+
+Open, and Ben's call. We cannot emit a bare zpub instead: that is a
+base58check re-encode, which PLAN A-22 keeps out of `coresigner/`, and
+Core has no zpub. Adding a crypto-account export is real work and touches
+A-11 and A-22, so it is a decision and not a fix.
+
+This also contradicts E-4's research, which said BlueWallet reads the
+same plain descriptor QR as Sparrow. Sparrow does. BlueWallet does not.
+
 ### E-4 The five coordinators are unproven on a device
 
 The coordinator chooser was removed from the export because the research

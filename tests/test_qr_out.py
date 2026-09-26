@@ -491,5 +491,60 @@ else:
     ok(f"the export screen shows all {len(_painted)} masks, every one a "
        "different image, and still answers the button")
 
+# --- DOWN holds one mask, so a scanner can be handed a STATIC code -----
+#
+# The cycling is the only thing on this device that changes a QR while a
+# scanner is looking at it, and a scanner that reads a changing image as
+# a multi-part code waits for a part that never arrives. BlueWallet hangs
+# on this export (Ben, 2026-09-24). Holding a mask is what tells a tester
+# whether the cycling is the cause, so it has to actually stop: a hold
+# that still advances proves nothing either way.
+#
+# The keys go in as a script and the frames painted after the hold are
+# read back. Rule 2: this counts DISTINCT images the device painted, and
+# does not ask main.py what it thinks it is showing.
+_painted.clear()
+_sess = coresigner_main.Session(_Disp(), hal.DevButtons("dddda"), rpc=object(),
+                                animate=False)
+_sess._export_qr("coresigner", _DESC, "wpkh")
+_after_hold = _painted[len(qrchannel.QR_MASKS):-0 or None][:4]
+if len({i.tobytes() for i in _after_hold}) != 1:
+    bad(f"DOWN four times painted {len({i.tobytes() for i in _after_hold})} "
+        "different images; the hold does not hold, so a scanner is still "
+        "being shown a moving target")
+else:
+    ok("DOWN holds one mask and keeps holding it")
+
+# LEFT and RIGHT must reach every mask and come back, or a tester cannot
+# say WHICH mask a coordinator choked on.
+_painted.clear()
+_steps = "d" + "r" * len(qrchannel.QR_MASKS)
+_sess = coresigner_main.Session(_Disp(), hal.DevButtons(_steps + "a"),
+                                rpc=object(), animate=False)
+_sess._export_qr("coresigner", _DESC, "wpkh")
+_stepped = _painted[len(qrchannel.QR_MASKS):]
+_seen = {i.tobytes() for i in _stepped}
+if len(_seen) != len(qrchannel.QR_MASKS):
+    bad(f"stepping RIGHT through the set reached {len(_seen)} of "
+        f"{len(qrchannel.QR_MASKS)} masks")
+elif _stepped[0].tobytes() != _stepped[-1].tobytes():
+    bad("stepping RIGHT once per mask did not return to the first one, so "
+        "the step does not wrap")
+else:
+    ok(f"LEFT and RIGHT reach all {len(qrchannel.QR_MASKS)} masks and wrap")
+
+# UP lets go, and the cycle must be the ORIGINAL frames again: a held
+# render carries a line saying it is held, and shipping that to a
+# coordinator would be a different image from the one Sparrow was tested
+# against.
+_painted.clear()
+_sess = coresigner_main.Session(_Disp(), hal.DevButtons("dua"), rpc=object(),
+                                animate=False)
+_sess._export_qr("coresigner", _DESC, "wpkh")
+if _painted[-1].tobytes() != _painted[0].tobytes():
+    bad("UP did not return the screen to the first cycling frame")
+else:
+    ok("UP lets go and the plain cycling frame comes back")
+
 print(f"\n{len(fails)} failure(s)")
 sys.exit(1 if fails else 0)

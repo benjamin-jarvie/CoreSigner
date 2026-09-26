@@ -134,8 +134,7 @@ elif not drew(sess, screens.text_entry(
         _upto, _cur, "xprv", _mode,
         actions_sel=None, caret=AT + 1, actions=("ABORT", "DONE"),
         wrong={AT}, want_len=len(PAGES[0]),
-        hint=coresigner_main.Session._type_hint(screens.modes("xprv"), 0,
-                                                "xprv"))):
+        hint=coresigner_main.Session._type_hint(screens.modes("xprv"), 0))):
     bad(f"the screen was not redrawn with position {AT} marked")
 else:
     ok("a wrong character goes red where it sits, and the caret moves on")

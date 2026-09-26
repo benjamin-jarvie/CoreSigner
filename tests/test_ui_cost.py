@@ -386,16 +386,30 @@ def signed_outcome(keys):
     return sess._state_signed("x.psbt written")
 
 
+# The second choice was POWER OFF until 2026-09-24, and so was C. Ben
+# cut both: "it's not intuitive and they can just pull the cable if they
+# want to turn it off or do it from home". Powering down lives in
+# Settings, where a person goes looking for it. C now does nothing here,
+# which is what every other screen's unused button does, so it is
+# checked by the ScriptedButtons script running out rather than by a
+# return value.
 cases = [("a", coresigner_main.SIGN_AGAIN, "A on the default choice signs another"),
-         ("ra", coresigner_main.POWER_OFF, "R then A powers off"),
+         ("ra", coresigner_main.TO_HOME, "R then A goes home"),
          ("rla", coresigner_main.SIGN_AGAIN, "R then L returns to sign another"),
-         ("c", coresigner_main.POWER_OFF, "C on the result powers off")]
+         ("ba", coresigner_main.TO_HOME, "B leaves the screen, as it does everywhere")]
 for keys, want, why in cases:
     got = signed_outcome(keys)
     if got != want:
         bad(f"_state_signed({keys!r}) returned {got!r}, expected {want!r}")
     else:
         ok(f"_state_signed: {why}")
+
+try:
+    signed_outcome("c")
+except AssertionError:
+    ok("_state_signed: C no longer halts the device from the result screen")
+else:
+    bad("C still leaves the result screen; POWER OFF was cut from it")
 
 
 

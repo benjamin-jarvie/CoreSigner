@@ -1,6 +1,7 @@
 {
-  "hw/vendor/fonts/NOTICE.md": "3a3e71507c3c0b8b8daacc4056549d8668df4096e1f7b9173b7d711ec51c8a11",
+  "hw/vendor/fonts/NOTICE.md": "3545345f78d92b3f1f6fcbbf8c8846d0fdbe0be4ebc6003acb6f9caacbf6f844",
   "hw/vendor/fonts/fa-solid-subset.ttf": "42b8c60a45dea583f02e80491311ec668d296d9005a1be7413d50a162d2f4675",
+  "hw/vendor/fonts/iosevka-mono-subset.ttf": "384e48f35c91d4502c93831904e37659d52d1db35c20b2cba04bdf9f5460254f",
   "hw/vendor/st7789.py": "38abdc42d9259b31e895679bcc828e93126544451655b59bdeebf88606be9abb",
   "hw/vendor/ur2/LICENSE": "2f1b5bb0af989ba3080b7eae752992e65873e294db9fa13bef1858c96fc91113",
   "hw/vendor/ur2/VENDORED.md": "e4b6d2d34fe498b7a4bd3ef8d6b7d02a072a6e2da56e53d1e7a69bdcb97c1584",

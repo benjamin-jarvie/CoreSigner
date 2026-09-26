@@ -24,6 +24,11 @@ CREAM = "#F5EFE0"
 #: moved with it.
 RED = "#FF4B3E"
 GREY = "#B8B2A6"
+#: One step down from CREAM, for every OTHER group of four in a long
+#: string of characters. Ben, from the board notes: a subtle change of
+#: colour every four characters. It has to stay well clear of GREY, which
+#: on this device means "not this one" and would read as a dead group.
+CREAM_DIM = "#D8D1C0"
 # The one gold. Ben set it to #FBDC7B on 2026-09-05: "which will be the
 # universal color where we currently have gold". It was #C8912F, which
 # read as brown beside the cream on a lit panel. Every gold on the device
@@ -44,6 +49,41 @@ _ICON_TTF = (Path(__file__).resolve().parent.parent
 @lru_cache(maxsize=None)
 def _iconfont(size):
     return ImageFont.truetype(str(_ICON_TTF), size)
+
+
+_MONO_TTF = (Path(__file__).resolve().parent.parent
+             / "hw" / "vendor" / "fonts" / "iosevka-mono-subset.ttf")
+
+#: Smallest a KEY CHARACTER may be drawn. Below this the loop on the
+#: lowercase k fills in and the letter goes back to being a small K.
+#: Measured, not chosen: tests/test_mono_font.py fails if it moves.
+MONO_FLOOR = 13
+
+
+@lru_cache(maxsize=None)
+def _mono(size):
+    """The face for characters a person copies or compares.
+
+    Iosevka, cut to the characters this device paints, with the looped
+    `k` swapped into the k slot (tools/make_mono_font.py). Two properties
+    earn it a place beside the prose face:
+
+    * the lowercase k closes into a loop, so it stops being a short K.
+      Ben could not separate the pair on the board, and at 17px the prose
+      face gives nothing to separate them by.
+    * it is MONOSPACED, so every character occupies one width. A key is
+      read one character at a time against paper, and a fixed pitch means
+      box 7 character 3 sits where box 7 character 3 sat on the last
+      screen.
+
+    Prose keeps the prose face. This is for keys, addresses, fingerprints,
+    descriptors and paths.
+    """
+    return ImageFont.truetype(str(_MONO_TTF), size)
+
+
+def _face(size, mono):
+    return _mono(size) if mono else _font(size)
 
 
 # Font Awesome Free Solid codepoints (see hw/vendor/fonts/NOTICE.md).
@@ -115,14 +155,19 @@ def _tracked_width(font, text, tracking, weight):
             + tracking * max(len(text) - 1, 0) + weight)
 
 
-def _fit(d, xy, text, size, fill, anchor, maxw, bold=False, tracking=0.0):
+def _fit(d, xy, text, size, fill, anchor, maxw, bold=False, tracking=0.0,
+         mono=False):
     """Draw text at `size`, shrinking until it fits `maxw`.
 
+    `mono` draws it in the key face instead of the prose face: see _mono.
+    It also raises the floor to MONO_FLOOR, because a key character that
+    shrank past the floor would lose the loop on its k and start lying
+    about which case it is. A mono string that will not fit is cut to an
+    ellipsis rather than shrunk into a lie.
+
     `bold` draws the word a second time one pixel to the right, which
-    thickens the stems and leaves the letterforms alone. The panel font is
-    Pillow's built-in and has no bold cut, and vendoring a second face to
-    thicken four words would put a new file in the supply chain, its
-    licence in the NOTICE and its name in three tests. The obvious
+    thickens the stems and leaves the letterforms alone. The prose face is
+    Pillow's built-in and has no bold cut. The obvious
     alternative, `stroke_width=1`, outlines every glyph on all four sides:
     at 12px that closed the counters and "SETTINGS" came out a smear
     (looked at, 2026-09-06). The extra pixel is measured as well as drawn,
@@ -137,6 +182,7 @@ def _fit(d, xy, text, size, fill, anchor, maxw, bold=False, tracking=0.0):
     test_screen_fit pins every string inside the canvas).
     """
     weight = 1 if bold else 0
+    floor = MONO_FLOOR if mono else 6
 
     def width(s_, f_):
         if tracking:
@@ -145,8 +191,8 @@ def _fit(d, xy, text, size, fill, anchor, maxw, bold=False, tracking=0.0):
         return box[2] - box[0] + weight
 
     while True:
-        font = _font(size)
-        if width(text, font) <= maxw or size <= 6:
+        font = _face(size, mono)
+        if width(text, font) <= maxw or size <= floor:
             break
         size -= 1
     if width(text, font) > maxw:
@@ -163,7 +209,7 @@ def _fit(d, xy, text, size, fill, anchor, maxw, bold=False, tracking=0.0):
                anchor=anchor)
 
 
-def _fit_block(d, lines, xs, size, fill, anchor, maxw):
+def _fit_block(d, lines, xs, size, fill, anchor, maxw, mono=False):
     """Draw several lines of body copy at ONE shared size.
 
     _fit shrinks each string on its own, which is right for a single string
@@ -175,26 +221,35 @@ def _fit_block(d, lines, xs, size, fill, anchor, maxw):
     draws them all at it. Falls back to _fit per line only at the floor, so
     a pathological string still degrades rather than running off the edge.
     """
-    while size > 6:
-        if all(_width(d, text, size, anchor, xs[0]) <= maxw for text in lines):
+    floor = MONO_FLOOR if mono else 6
+    while size > floor:
+        if all(_width(d, text, size, anchor, xs[0], mono) <= maxw
+               for text in lines):
             break
         size -= 1
-    font = _font(size)
+    font = _face(size, mono)
     for text, xy in zip(lines, xs, strict=True):
-        if _width(d, text, size, anchor, xy) > maxw:
-            _fit(d, xy, text, size, fill, anchor, maxw)   # floor reached
+        if not text:
+            # A blank line is a SPACER. Painting it drops a zero-width
+            # mark at that point, which the collision check reads as a
+            # string sitting on whatever else is drawn there: the
+            # corrections screen paints its fingerprint into exactly
+            # such a gap (test_screen_fit, 2026-09-24).
+            continue
+        if _width(d, text, size, anchor, xy, mono) > maxw:
+            _fit(d, xy, text, size, fill, anchor, maxw, mono=mono)  # floor
         else:
             d.text(xy, text, font=font, fill=fill, anchor=anchor)
     return size
 
 
-def _width(d, text, size, anchor, xy):
-    box = d.textbbox(xy, text, font=_font(size), anchor=anchor)
+def _width(d, text, size, anchor, xy, mono=False):
+    box = d.textbbox(xy, text, font=_face(size, mono), anchor=anchor)
     return box[2] - box[0]
 
 
 def _row(d, left, right, y, lhs, rhs, lhs_size, rhs_size, lhs_fill,
-         rhs_fill, gap):
+         rhs_fill, gap, lhs_mono=False, rhs_mono=False):
     """Two strings on one line, one left-anchored and one right-anchored,
     that cannot collide.
 
@@ -212,14 +267,16 @@ def _row(d, left, right, y, lhs, rhs, lhs_size, rhs_size, lhs_fill,
     losing its ends.
     """
     span = right - left
-    while (rhs_size > 6
-           and _width(d, rhs, rhs_size, "rm", (right, y)) > span - gap):
+    floor = MONO_FLOOR if rhs_mono else 6
+    while (rhs_size > floor
+           and _width(d, rhs, rhs_size, "rm", (right, y), rhs_mono)
+           > span - gap):
         rhs_size -= 1
-    d.text((right, y), rhs, font=_font(rhs_size), fill=rhs_fill, anchor="rm")
-    rhs_left = d.textbbox((right, y), rhs, font=_font(rhs_size),
-                          anchor="rm")[0]
+    face = _face(rhs_size, rhs_mono)
+    d.text((right, y), rhs, font=face, fill=rhs_fill, anchor="rm")
+    rhs_left = d.textbbox((right, y), rhs, font=face, anchor="rm")[0]
     _fit(d, (left, y), lhs, lhs_size, lhs_fill, "lm",
-         max(1, rhs_left - left - gap))
+         max(1, rhs_left - left - gap), mono=lhs_mono)
 
 
 def _actions(d, w, h, labels, selected=1):
@@ -331,7 +388,7 @@ def home(w, h, selected=0, xfp=None):
     mx, my, gap = int(w * 0.06), int(h * 0.09), int(w * 0.04)
     if xfp:
         _fit(d, (w // 2, int(h * 0.055)), xfp.upper(), int(h * 0.062),
-             OCHRE, "mm", int(w * 0.9))
+             OCHRE, "mm", int(w * 0.9), mono=True)
         my = int(h * 0.125)
     bw = (w - 2 * mx - gap) // 2
     # Bottom margin stays at the original 0.09 so the tiles keep their
@@ -428,7 +485,7 @@ def _quorum_text(quorum, cosigners, ours, timelocks=(),
         head = ""
     if head and path:
         return f"{head} · {path}"
-    return head or path
+    return head
 
 
 def _cosigner_row(d, w, y, cosigners, ours, size, maxw):
@@ -451,11 +508,11 @@ def _cosigner_row(d, w, y, cosigners, ours, size, maxw):
     marks = [x for x, _ in cosigners]
     gap = max(3, int(w * 0.018))
     while True:
-        font = _font(size)
+        font = _mono(size)
         widths = [d.textbbox((0, 0), m, font=font)[2] for m in marks]
         sep_w = d.textbbox((0, 0), "·", font=font)[2]
         total = sum(widths) + (len(marks) - 1) * (sep_w + gap * 2)
-        if total <= maxw or size <= 6:
+        if total <= maxw or size <= MONO_FLOOR:
             break
         size -= 1
     if total > maxw:
@@ -494,21 +551,40 @@ def review(w, h, outputs, fee_btc, input_total_btc=None,
     become a screen with a SIGN button on it. The coupling lived in
     main.py alone until 2026-09-08, the way find_unsigned's symlink
     argument lived in one file before audit A1."""
-    pages = max(1, (len(outputs) + 1) // 2)
+    # ONE output a page. Ben went from more to two on 2026-09-01 for
+    # "less going on per frame", and asked on 2026-09-24 for the whole
+    # address instead of `first 8 … last 4`. Those two pull against each
+    # other: measured at the 13px floor, 40 characters fit across the
+    # band, so a 42-character segwit address takes two rows and a
+    # 62-character taproot one takes two. Two outputs is then six rows in
+    # 91 pixels, with nothing between them. One output a page buys the
+    # room, and it is the same direction the 2026-09-01 call was already
+    # going.
+    pages = max(1, len(outputs))
     title = ("REVIEW  TRANSACTION" if pages == 1
-             else f"REVIEW  ·  OUTPUTS {page + 1}/{pages}")
+             else f"REVIEW  ·  OUTPUT {page + 1}/{pages}")
     # This is the screen you sign from, and it was the one scrollable
     # screen with no bar on it (two-axis review, 2026-09-05).
     img, d = _frame(w, h, title)
-    y = int(h * 0.20)
     left, right, gap = int(w * 0.06), int(w * 0.94), int(w * 0.03)
-    for addr, amt in outputs[page * 2:page * 2 + 2]:
-        # SeedSigner-style short truncation so address and amount share
-        # one line: first 8, ellipsis, last 4.
-        short = addr[:8] + "…" + addr[-4:] if len(addr) > 13 else addr
-        _row(d, left, right, y, short, f"{amt:.8f}",
-             int(h * 0.055), int(h * 0.055), CREAM, CREAM, gap)
-        y += int(h * 0.115)
+    for addr, amt in outputs[page:page + 1]:
+        # The amount first and on its own line, because it is the number
+        # a person checks before they read anything else.
+        _row(d, left, right, int(h * 0.22), "TO", f"{amt:.8f} BTC",
+             int(h * 0.05), int(h * 0.065), GREY, CREAM, gap,
+             rhs_mono=True)
+        # Then the address WHOLE, in the key face, grouped in fours and
+        # coloured by the same rule the receive screen uses. Truncation
+        # is what address-replacement malware is built to survive, so
+        # this screen stopped doing it (Ben, board notes 2026-09-24).
+        #
+        # It is NOT centred in a fixed band. A 42-character segwit
+        # address takes two rows and a 62-character taproot one takes
+        # three on a 240-wide panel, so everything under it is placed
+        # from the bottom the block reports rather than from a fraction
+        # that is only right for one of them.
+        bottom = _address_block(d, w, addr, int(h * 0.27), int(h * 0.52),
+                                int(w * 0.88), centre=False)
     # M1 decision 2 and M3 decision 2, in the band between the outputs
     # and the fee. With arbitrary paths allowed, the path is the only
     # thing telling a wallet you set up from one you did not, and the
@@ -525,26 +601,33 @@ def review(w, h, outputs, fee_btc, input_total_btc=None,
     # (two-axis review, 2026-09-10).
     line = _quorum_text(quorum, cosigners, ours, timelocks, spend_lock)
     if line:
-        _fit(d, (w // 2, int(h * 0.435)), line, int(h * 0.042),
+        _fit(d, (w // 2, bottom + int(h * 0.045)), line, int(h * 0.042),
              CREAM if quorum != "mixed" else OCHRE, "mm", int(w * 0.92))
-        _cosigner_row(d, w, int(h * 0.487), cosigners, ours,
+        _cosigner_row(d, w, bottom + int(h * 0.09), cosigners, ours,
                       int(h * 0.040), int(w * 0.92))
-    if pages > 1:
-        d.text((w // 2, int(h * 0.545) if line else y + int(h * 0.01)),
-               "UP/DOWN · more outputs",
-               font=_font(int(h * (0.042 if line else 0.045))), fill=OCHRE,
-               anchor="mm")
-    ky = int(h * 0.58)
+    # NO HINT LINE. "UP/DOWN · more outputs" was a second way of saying
+    # what the scrollbar says, and Ben ruled on exactly this shape on the
+    # corrections screen (2026-09-23: "just show the scroll bar if we
+    # scroll"). One output a page needs the room for the address.
+    #
+    # The rule sits under whatever the band above actually used. M3:
+    # "If they do not fit, the fingerprints are the line to move, not
+    # the fee", and the fee still holds its place at the bottom.
+    ky = max(int(h * 0.58),
+             int(bottom + h * (0.125 if line else 0.045)))
     d.line([(left, ky), (right, ky)], fill=GREY, width=1)
+    # The fee WAS h * 0.075, the largest type anywhere on the screen, so
+    # the eye landed on the miner's cut before the amount being sent
+    # (Ben, board notes 2026-09-24). It now matches the amount above it.
     _row(d, left, right, ky + int(h * 0.075), "FEE", f"{fee_btc:.8f} BTC",
-         int(h * 0.06), int(h * 0.075), GREY, RED, gap)
+         int(h * 0.05), int(h * 0.055), GREY, RED, gap, rhs_mono=True)
     if input_total_btc is not None:
         _fit(d, (right, ky + int(h * 0.17)),
              f"Inputs {input_total_btc:.8f} BTC",
              int(h * 0.045), GREY, "rm", right - left)
     if unseen_pages:
-        _fit(d, (w // 2, int(h * 0.80)), "See every output before you sign",
-             int(h * 0.045), OCHRE, "mm", int(w * 0.92))
+        _fit(d, (w // 2, int(h * 0.84)), "See every output before you sign",
+             int(h * 0.042), OCHRE, "mm", int(w * 0.92))
     if pages > 1:
         scrollbar(d, w, int(h * 0.16), int(h * 0.62), page, pages)
     _actions(d, w, h, ["REJECT", "SIGN"], actions_sel)
@@ -561,15 +644,20 @@ def result(w, h, ok=True, detail="tx-a4f2-signed.psbt written",
     (Ben, on the board, 2026-09-05). Signing passes SIGNED; everything
     else says DONE.
 
-    When actions_sel is given, the screen offers SIGN ANOTHER / POWER OFF
-    instead of ending the session.
+    When actions_sel is given, the screen offers SIGN ANOTHER / HOME
+    instead of ending the session. It said POWER OFF until 2026-09-24.
+
+    `detail` may be empty: signing to a QR has no filename to name, and
+    the frame count that used to fill the line said something about the
+    rendering rather than about the transaction (Ben, board notes).
     """
     if label is None:
         label = "SIGNED" if ok else "FAILED"
     img, d = _frame(w, h)
     _status_circle(img, d, w, h, label, OCHRE if ok else RED)
-    _fit(d, (w // 2, int(h * 0.68)), detail, int(h * 0.055), CREAM, "mm",
-         int(w * 0.92))
+    if detail:
+        _fit(d, (w // 2, int(h * 0.68)), detail, int(h * 0.055), CREAM,
+             "mm", int(w * 0.92))
     if note:
         # What the signature MEANS, under where it went. M3 traded
         # SIGNED-over-a-partial against the review screen stating the
@@ -580,7 +668,7 @@ def result(w, h, ok=True, detail="tx-a4f2-signed.psbt written",
         _fit(d, (w // 2, int(h * 0.79)), note, int(h * 0.045), OCHRE, "mm",
              int(w * 0.92))
     if actions_sel is not None:
-        _actions(d, w, h, ["SIGN ANOTHER", "POWER OFF"], actions_sel)
+        _actions(d, w, h, ["SIGN ANOTHER", "HOME"], actions_sel)
     return img
 
 
@@ -907,9 +995,9 @@ def path_echo(w, h, path, checksum, selected=0):
     """
     img, d = _frame(w, h, "CHECK  THE  PATH")
     _fit(d, (w // 2, int(h * 0.30)), path, int(h * 0.065), CREAM, "mm",
-         int(w * 0.92))
+         int(w * 0.92), mono=True)
     _fit(d, (w // 2, int(h * 0.48)), checksum.upper(), int(h * 0.10),
-         OCHRE, "mm", int(w * 0.9))
+         OCHRE, "mm", int(w * 0.9), mono=True)
     _fit_block(d, ["Core made this checksum.",
                    "It changes if the path does."],
                [(w // 2, int(h * 0.64)), (w // 2, int(h * 0.73))],
@@ -1071,6 +1159,83 @@ def _groups(text):
     return [text[i:i + 4] for i in range(0, len(text), 4)]
 
 
+def _group_fill(index, total):
+    """What colour the `index`th group of four is drawn in.
+
+    The ends are gold, because they are where a person starts and stops
+    when comparing against a coordinator. Every other group in between
+    steps down to CREAM_DIM, which gives the eye a rhythm to count along
+    without adding a rule or a gap. Both screens that paint a long string
+    of characters call this, so neither can invent its own scheme.
+
+    The ends being marked never means the ends are enough: address
+    replacement malware matches exactly those. docs/TESTER-PACK.md says
+    so where a tester reads it.
+    """
+    if index in (0, total - 1):
+        return OCHRE
+    return CREAM_DIM if index % 2 else CREAM
+
+
+def _address_block(d, w, text, top, floor, maxw, start=None, centre=True):
+    """Draw `text` WHOLE, in groups of four, centred between top and floor.
+
+    Two screens show an address a person compares against a coordinator,
+    and both must show every character: truncation is the one thing
+    address-replacement malware is built to survive. So the shape is
+    chosen rather than fixed. Every row split is tried, and the one that
+    buys the largest type inside the band wins. A 42-character segwit
+    address and a 62-character taproot one then both fill the band they
+    are given instead of one of them rattling around in it.
+
+    `centre` centres the rows in the band. A review screen sets it
+    False and reads the returned bottom, because what follows the
+    address there has to start under however many rows this took.
+
+    Returns the y the block ENDS at, so a caller can flow the next thing
+    beneath it instead of assuming a height.
+    """
+    groups = _groups(text)
+    best = None
+    for per_row in range(1, len(groups) + 1):
+        rows = [groups[i:i + per_row]
+                for i in range(0, len(groups), per_row)]
+        widest = max(len(" ".join(r)) for r in rows)
+        # WIDTH IS THE HARD ONE. A row wider than the band is painted off
+        # the side of the panel, where it is simply not there; too many
+        # rows only crowds what follows. So a split that cannot fit the
+        # width at the floor is not a candidate at all, and the height is
+        # what gives (test_screen_fit, 98 strings off a 240x240 panel).
+        if d.textlength("W" * widest, font=_mono(MONO_FLOOR)) > maxw:
+            continue
+        size = start or int(floor - top)
+        while size > MONO_FLOOR:
+            if (d.textlength("W" * widest, font=_mono(size)) <= maxw
+                    and len(rows) * size * LINE_SPACING <= floor - top):
+                break
+            size -= 1
+        if best is None or (size, -len(rows)) > (best[0], -len(best[1])):
+            best = (size, rows, per_row)
+    size, rows, per_row = best
+    font = _mono(size)
+    step = size * LINE_SPACING
+    space = d.textlength(" ", font=font)
+    y0 = (top + ((floor - top) - len(rows) * step) / 2 + step / 2
+          if centre else top + step / 2)
+    # One row is measured whole, then drawn group by group at that
+    # spacing, so each group carries its colour IN PLACE. Colouring
+    # anywhere else would not help the eye track the comparison.
+    for r, row in enumerate(rows):
+        y = y0 + r * step
+        x = (w - d.textlength(" ".join(row), font=font)) / 2
+        for g, group in enumerate(row):
+            d.text((x, y), group, font=font,
+                   fill=_group_fill(r * per_row + g, len(groups)),
+                   anchor="lm")
+            x += d.textlength(group, font=font) + space
+    return y0 + (len(rows) - 1) * step + size / 2
+
+
 #: Row pitch as a multiple of the type size, on the address screen. The
 #: font's own line height is tighter than this and runs the rows of a
 #: taproot address together; 1.45 keeps them apart at every size the
@@ -1155,21 +1320,35 @@ def _qr_card(w, h, code, reserve=0):
     return img, d, top + card_h + STROKE
 
 
-def qr_export(w, h, code, xfp, kind, path):
+def qr_export(w, h, code, xfp, kind, path, mask=None, masks=None):
     """The export QR, with its identity underneath (Ben, 2026-09-05).
 
     The fingerprint, the script type and the derivation path run in one
     line below the card, so a coordinator can be checked rather than
     trusted.
+
+    `mask` says the cycling is STOPPED and this one render is being held.
+    The screen has to say so, because a frozen code and a cycling one
+    look identical in a photograph and the whole point of freezing is to
+    find out which of the two a scanner is choking on. It names the mask
+    so a reader that works on one and not another can be reported as
+    "mask 5 of 8" rather than as "sometimes".
     """
     img, d, below = _qr_card(w, h, code, reserve=int(h * 0.11))
+    line = (f"{xfp.upper()}  ·  {SCRIPT_LABELS[kind].upper()}  ·  "
+            f"{shown_path(path)}")
     # Centred between the outside of the stroke and the bottom of the
     # screen, which is what Ben asked for and what stops the line looking
     # tacked onto the card.
-    _fit(d, (w // 2, (below + h) // 2),
-         f"{xfp.upper()}  ·  {SCRIPT_LABELS[kind].upper()}  ·  "
-         f"{shown_path(path)}",
-         int(h * 0.045), CREAM, "mm", int(w * 0.94))
+    if mask is None:
+        _fit(d, (w // 2, (below + h) // 2), line,
+             int(h * 0.045), CREAM, "mm", int(w * 0.94))
+    else:
+        _fit(d, (w // 2, below + int(h * 0.035)), line,
+             int(h * 0.040), CREAM, "mm", int(w * 0.94))
+        _fit(d, (w // 2, below + int(h * 0.082)),
+             f"HELD  ·  MASK {mask + 1}/{masks}  ·  LEFT RIGHT to step",
+             int(h * 0.040), OCHRE, "mm", int(w * 0.94))
     return img
 
 
@@ -1218,48 +1397,13 @@ def address_page(w, h, index, address, kind, total=None, switchable=False):
     is the only thing that shows what those two presses did.
     """
     img, d = _frame(w, h, f"{_ordinal(index + 1).upper()}  RECEIVE  ADDRESS")
-    groups = _groups(address)
-    # Fewer groups on a row makes every character bigger, and the height
-    # to pay for it came from dropping the footer (E-7 item 5). So the
-    # shape is chosen and not fixed: the largest type that still fits the
-    # band under the title. A 42-character segwit address took 3 rows of
-    # 4 at 15px and takes 4 rows of 3 at 20px.
-    top, floor = h * 0.24, h * (0.86 if switchable else 0.95)
-    best = None
-    for per_row in (4, 3, 2):
-        rows = [groups[i:i + per_row]
-                for i in range(0, len(groups), per_row)]
-        widest = max(len(" ".join(r)) for r in rows)
-        size = int(h * 0.12)
-        while size > 6:
-            wide_enough = d.textlength("W" * widest,
-                                       font=_font(size)) <= w * 0.92
-            if wide_enough and len(rows) * size * LINE_SPACING <= floor - top:
-                break
-            size -= 1
-        if best is None or size > best[0]:
-            best = (size, rows)
-    size, rows = best
-    font = _font(size)
-    step = size * LINE_SPACING
-    space = d.textlength(" ", font=font)
-    # Centred in the band, so a 3-row segwit address and a 6-row taproot
-    # one both sit under the title rather than against it.
-    y0 = top + ((floor - top) - len(rows) * step) / 2 + step / 2
-    # One row is measured whole, then drawn group by group at that
-    # spacing, so the first and last group carry their colour IN PLACE.
-    # Colouring them anywhere else would not help the eye track the
-    # comparison.
-    for r, row in enumerate(rows):
-        y = y0 + r * step
-        line_w = d.textlength(" ".join(row), font=font)
-        x = (w - line_w) / 2
-        for g, group in enumerate(row):
-            first = r == 0 and g == 0
-            last = r == len(rows) - 1 and g == len(row) - 1
-            d.text((x, y), group, font=font,
-                   fill=OCHRE if (first or last) else CREAM, anchor="lm")
-            x += d.textlength(group, font=font) + space
+    # The height to give it came from dropping the footer (E-7 item 5).
+    # _address_block picks the row split that buys the largest type in
+    # that band, so a 42-character segwit address and a 62-character
+    # taproot one each fill it.
+    _address_block(d, w, address, h * 0.24,
+                   h * (0.86 if switchable else 0.95), w * 0.92,
+                   start=int(h * 0.12))
     if switchable:
         _fit(d, (w // 2, int(h * 0.92)), SCRIPT_LABELS[kind].upper(),
              int(h * 0.05), GREY, "mm", int(w * 0.7))
@@ -1285,7 +1429,7 @@ def export_text(w, h, chunk, page=0, pages=1, title="PUBLIC  KEY"):
         y = int(h * (0.26 + (row_start // GROUPS_PER_ROW) * 0.13))
         _fit(d, (w // 2, y),
              "  ".join(groups[row_start:row_start + GROUPS_PER_ROW]),
-             int(h * 0.075), CREAM, "mm", int(w * 0.92))
+             int(h * 0.075), CREAM, "mm", int(w * 0.92), mono=True)
     if pages > 1:
         scrollbar(d, w, int(h * 0.16), int(h * 0.62), page, pages)
     _actions(d, w, h, ["BACK", "NEXT" if page + 1 < pages else "DONE"], 1)
@@ -1309,7 +1453,7 @@ def confirm_discard(w, h, xfp, selected=0):
     """Discard asks first. BACK is pre-selected; DISCARD must be chosen."""
     img, d = _frame(w, h, "DISCARD  KEY")
     _fit(d, (w // 2, int(h * 0.32)), (xfp or "").upper(), int(h * 0.11),
-         CREAM, "mm", int(w * 0.9))
+         CREAM, "mm", int(w * 0.9), mono=True)
     _fit_block(d, ["Core forgets this key now.",
                    "Your backup is the only copy."],
                [(w // 2, int(h * 0.55)), (w // 2, int(h * 0.65))],
@@ -1334,8 +1478,9 @@ def choose_key(w, h, keys, owners, selected=0):
             d.rounded_rectangle([int(w * 0.04), y - int(h * min(pitch, 0.2) * 0.46),
                                  int(w * 0.96), y + int(h * min(pitch, 0.2) * 0.46)],
                                 radius=4, outline=OCHRE)
-        _fit(d, (int(w * 0.08), y), (xfp or "????????").upper(), int(h * 0.065),
-             CREAM if owns else GREY, "lm", int(w * 0.50))
+        _fit(d, (int(w * 0.08), y), (xfp or "????????").upper(),
+             int(h * 0.065), CREAM if owns else GREY, "lm",
+             int(w * 0.50), mono=True)
         _fit(d, (int(w * 0.92), y), "owns the inputs" if owns else "not this one",
              int(h * 0.04), OCHRE if owns else GREY, "rm", int(w * 0.38))
     _actions(d, w, h, ["BACK", "SIGN WITH IT"], 1)
@@ -1580,8 +1725,8 @@ def text_entry(w, h, title, text, cursor=0, charset="xprv", mode=0,
                 else:
                     d.rectangle(box, outline=OCHRE, width=1)
             here = i == cursor and actions_sel is None
-            _fit(d, (gx, gy), ch, int(h * 0.05),
-                 INK if here else CREAM, "mm", cell_w)
+            _fit(d, (gx, gy), ch, max(MONO_FLOOR, int(h * 0.05)),
+                 INK if here else CREAM, "mm", cell_w, mono=True)
     _actions(d, w, h, list(actions), actions_sel)
     return img
 
@@ -1598,12 +1743,16 @@ def _box(d, x, y, group, number, w, h, secret, caret, wrong, index,
 
     The box holding the caret is outlined in gold. A two-pixel underline
     was the only mark of where you were, and finding it took a hunt.
+
+    Both the characters and the number are drawn in the key face. The
+    number is not key material, but it is read as part of the box, and a
+    proportional digit beside a monospaced group sits at the wrong pitch.
     """
     size = int(h * 0.072)
     bw, bh = slot * 4, int(h * 0.105)
     edge = OCHRE if active else GREY
     _fit(d, (x - int(w * 0.018), y), str(number), size, edge, "rm",
-         int(w * 0.06))
+         int(w * 0.06), mono=True)
     d.rectangle([x, y - bh // 2, x + bw, y + bh // 2],
                 outline=edge, width=2 if active else 1)
     for i, ch in enumerate(group):
@@ -1631,7 +1780,7 @@ def _box(d, x, y, group, number, w, h, secret, caret, wrong, index,
             # Drawn AFTER the red, so the notch reads on a slot that is
             # both wrong and where you are standing.
         _fit(d, (cx, y), "*" if secret and ch != " " else ch, size,
-             CREAM if ch != " " else GREY, "mm", int(slot * 0.9))
+             CREAM if ch != " " else GREY, "mm", int(slot * 0.9), mono=True)
 
 def wrong_character(w, h, box, char, typed, want):
     """The screen that stops you carrying on with a wrong character.
@@ -1655,7 +1804,8 @@ def wrong_character(w, h, box, char, typed, want):
         d.rectangle([right - int(w * 0.02), int(h * y) - size // 2 - 3,
                      right + size + int(w * 0.02), int(h * y) + size // 2 + 3],
                     outline=fill, width=2)
-        _fit(d, (right + size // 2, int(h * y)), ch, size, fill, "mm", size * 2)
+        _fit(d, (right + size // 2, int(h * y)), ch, size, fill, "mm",
+             size * 2, mono=True)
     _fit_block(d, [f"Write {want} on your paper at box {box},",
                    f"character {char}. I will fix it here."],
                [(w // 2, int(h * 0.70)), (w // 2, int(h * 0.78))],
@@ -1696,8 +1846,15 @@ def corrections(w, h, made, xfp, page=0, first=0, actions_sel=1):
     plural = "s" if n != 1 else ""
     img, d = _frame(w, h, f"{n}  CORRECTION{plural.upper()}")
     if page == 0:
+        # Ben's words, 2026-09-24: "This key with your 1 correction
+        # opens the key with the fingerprint GE8942A1". It said "opens
+        # D2B7E45C.", which names the thing without saying what the
+        # name IS, and a person who has never met a fingerprint reads
+        # eight characters of nothing.
+        FINGERPRINT = 2                         # the line drawn in the key face
         lines = [f"This key, with your {n} correction{plural},",
-                 f"opens {xfp.upper()}.",
+                 "opens the key with the fingerprint",
+                 "",
                  "",
                  "You may want to check it one more time.",
                  "",
@@ -1705,10 +1862,12 @@ def corrections(w, h, made, xfp, page=0, first=0, actions_sel=1):
                  f"{n} down and test",
                  "them, you may not be able to recover",
                  "this key or its funds."]
-        _fit_block(d, lines,
-                   [(w // 2, int(h * (0.22 + i * 0.075)))
-                    for i in range(len(lines))],
-                   int(h * 0.050), CREAM, "mm", int(w * 0.92))
+        ys = [(w // 2, int(h * (0.20 + i * 0.068)))
+              for i in range(len(lines))]
+        size = _fit_block(d, lines, ys, int(h * 0.050), CREAM, "mm",
+                          int(w * 0.92))
+        _fit(d, ys[FINGERPRINT], f"{xfp.upper()}.", size, OCHRE, "mm",
+             int(w * 0.92), mono=True)
         # NO HINT LINE. "DOWN for the 3 places" was a second way of
         # saying what the bar says, in gold, on a screen already full of
         # warning (Ben, 2026-09-23: "just show the scroll bar if we
@@ -1718,10 +1877,14 @@ def corrections(w, h, made, xfp, page=0, first=0, actions_sel=1):
     else:
         rows = [f"Box {b}, character {c} is {ch}" for b, c, ch in made]
         shown = rows[first:first + CORRECTIONS_SHOWN]
+        # In the key face whole. The row is a box number, a character
+        # number and the character to write, and the character is the
+        # payload: a row that says `k` where the key wants `K` sends
+        # somebody to a wallet that is not theirs.
         _fit_block(d, shown,
                    [(w // 2, int(h * (0.30 + i * 0.11)))
                     for i in range(len(shown))],
-                   int(h * 0.06), OCHRE, "mm", int(w * 0.86))
+                   int(h * 0.06), OCHRE, "mm", int(w * 0.86), mono=True)
         _fit(d, (w // 2, int(h * 0.80)), "Write these on your paper.",
              int(h * 0.045), GREY, "mm", int(w * 0.92))
         # The bar covers BOTH axes: which of the two screens you are on,
@@ -1830,9 +1993,9 @@ def backup_page(w, h, chunk, label, page=0, pages=1, actions_sel=1):
         for i, group in enumerate(row):
             x = x0 + i * cell
             _fit(d, (x + num_w, y), str(first + row_start + i), size,
-                 GREY, "rm", num_w)
+                 GREY, "rm", num_w, mono=True)
             _fit(d, (x + num_w + (cell - num_w) // 2, y), group, size,
-                 CREAM, "mm", cell - num_w - int(w * 0.01))
+                 CREAM, "mm", cell - num_w - int(w * 0.01), mono=True)
     if pages > 1:
         _fit(d, (w // 2, int(h * 0.79)),
              f"Characters {page * CHARS_PER_PAGE + 1}"

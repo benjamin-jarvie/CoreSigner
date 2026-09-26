@@ -1061,6 +1061,20 @@ class Session:
         fixed mask were tested and none of them is the cause. Across 120
         real descriptors the worst had **7 of 8 masks readable**, so
         showing all eight is what takes the failure to nothing.
+
+        **DOWN HOLDS ONE MASK, UP RESUMES, LEFT and RIGHT step.** The
+        cycling is the one thing on this device that makes a QR change
+        while a scanner is looking at it, and a scanner that treats a
+        changing image as a multi-part code waits for a part that never
+        comes. BlueWallet hangs on this export (Ben, 2026-09-24) and the
+        PSBT animation it does read is a different path, so the cycling
+        is the first suspect and there was no way to take it away
+        without rebuilding the firmware. Now there is: hold a mask, and
+        the panel is showing an ordinary static QR of the same text.
+
+        It stays in the shipped build. A coordinator that reads only one
+        of the eight is a real failure a tester can now report exactly
+        ("mask 5 of 8"), and the screen says which one it is holding.
         """
         xfp, path = signer.origin_of(desc)
         # Sized against QR_MAX_PX, not the panel, so the light card and the
@@ -1069,19 +1083,21 @@ class Session:
             desc, panel=(self.w, min(self.h, screens.QR_MAX_PX)))
         frames = [screens.qr_export(self.w, self.h, c, xfp, kind, path)
                   for c in codes]
+        # The same codes again, each saying which mask it is and that the
+        # cycling has stopped. Rendered up front, so holding a mask costs
+        # nothing at the moment the button is pressed.
+        held = [screens.qr_export(self.w, self.h, c, xfp, kind, path,
+                                  mask=i, masks=len(codes))
+                for i, c in enumerate(codes)]
         if not self.animate:
-            # Scripted runs paint one deterministic pass and then read,
-            # the way _show_qr_loop does, so a session stays reproducible.
-            for img in frames:
-                self.display.show(img)
-            while True:
-                key = self.buttons.read()
-                if key in ("b", "c"):
-                    return False
-                if key in ("a", "p"):
-                    return True
+            return self._export_qr_scripted(frames, held)
         answer = {}
         stop = threading.Event()
+        # `at` is the mask being held, or None while the set cycles. Only
+        # the key thread writes it and only the draw loop reads it, and a
+        # dict assignment is atomic, so neither can see half of a change
+        # and no lock is needed.
+        state = {"at": None}
 
         def wait_for_key():
             while True:
@@ -1090,15 +1106,57 @@ class Session:
                     answer["key"] = key
                     stop.set()
                     return
+                state["at"] = self._stepped_mask(state["at"], key,
+                                                 len(codes))
 
         threading.Thread(target=wait_for_key, daemon=True).start()
         while not stop.is_set():
+            if state["at"] is not None:
+                self.display.show(held[state["at"]])
+                stop.wait(self.EXPORT_MASK_DELAY)
+                continue
             for img in frames:
-                if stop.is_set():
+                if stop.is_set() or state["at"] is not None:
                     break
                 self.display.show(img)
                 stop.wait(self.EXPORT_MASK_DELAY)
         return answer.get("key") in ("a", "p")
+
+    def _export_qr_scripted(self, frames, held):
+        """One deterministic pass, then read, for a scripted session.
+
+        _show_qr_loop does the same: a test that raced a timer would be
+        a test that fails on a slow machine. Holding a mask works here
+        too, so the presses can be proven without a real panel.
+        """
+        for img in frames:
+            self.display.show(img)
+        at = None
+        while True:
+            key = self.buttons.read()
+            if key in ("b", "c"):
+                return False
+            if key in ("a", "p"):
+                return True
+            at = self._stepped_mask(at, key, len(frames))
+            self.display.show(frames[0] if at is None else held[at])
+
+    @staticmethod
+    def _stepped_mask(at, key, count):
+        """Where DOWN, UP, LEFT and RIGHT move the held mask.
+
+        DOWN holds. UP lets go. LEFT and RIGHT step, and hold first if
+        the set was still cycling, because a person pressing them is
+        already asking for one code rather than all of them.
+        """
+        if key == "d":
+            return 0 if at is None else at
+        if key == "u":
+            return None
+        if key in ("l", "r"):
+            step = -1 if key == "l" else 1
+            return (0 if at is None else at + step) % count
+        return at
 
     def _export_text(self, _name, desc, kind):
         """The same descriptor as text, for typing into a coordinator."""
@@ -1313,7 +1371,7 @@ class Session:
 
 
     @staticmethod
-    def _type_hint(runs, mode, charset=None):
+    def _type_hint(runs, mode):
         """What the screen says about the one control that is not obvious.
 
         The d-pad and A explain themselves. The mode button does not, so
@@ -1321,22 +1379,18 @@ class Session:
         single grid has no mode, and a hint about a button that does
         nothing is worse than silence.
 
-        On a key it also says that the first cell is a one. Ben read it
+        It used to add "1 is a one" on a key. Ben read the first cell
         as a capital I and asked whether one was meant to be there (on
-        the board, 2026-09-18). It is not: base58 drops I, l, O and
-        zero because at this size they are each other, which is the
-        whole reason the alphabet exists. Our own type then draws the
-        one as a bare stroke and puts the confusion back.
-
-        Four characters are missing and only one sentence fits, so the
-        sentence is the one a person can act on. The rule in full is a
-        section of docs/TESTER-PACK.md.
+        the board, 2026-09-18). base58 drops I, l, O and zero because at
+        that size they are each other, and the prose face then drew the
+        one as a bare stroke and put the confusion back. The key face
+        draws it with a flag and a foot, so the hint is gone and "A
+        types" keeps the place it was spending (Ben, 2026-09-24). The
+        rule in full is a section of docs/TESTER-PACK.md.
         """
         parts = ["A types", "B deletes"]
         if len(runs) > 1:
             parts.append(f"C for {runs[(mode + 1) % len(runs)][0]}")
-        if charset == "xprv":
-            parts = parts[1:] + ["1 is a one"]
         return "  ·  ".join(parts)
 
     def _text_entry(self, title, charset, secret=False, start=""):  # noqa: C901 - one keypad state machine; splitting it would hide the rules
@@ -1357,7 +1411,7 @@ class Session:
             self.display.show(screens.text_entry(
                 self.w, self.h, title, text, cur, charset, mode, secret,
                 actions_sel=sel, caret=caret,
-                hint=self._type_hint(runs, mode, charset)), sensitive=True)
+                hint=self._type_hint(runs, mode)), sensitive=True)
             key = self.buttons.read()
             if sel is not None:            # focus is on the action bar
                 if key in ("l", "r"):
@@ -1964,7 +2018,7 @@ class Session:
                 self.w, self.h, title, typed, cur, charset, mode,
                 actions_sel=sel, caret=caret, actions=("ABORT", "DONE"),
                 wrong=wrong, want_len=len(want), box_numbers=box_numbers,
-                hint=self._type_hint(runs, mode, charset)),
+                hint=self._type_hint(runs, mode)),
                 sensitive=True)
             key = self.buttons.read()
             if sel is not None:                 # the action bar
@@ -2413,7 +2467,6 @@ class Session:
                 # (two-axis review, 2026-09-08).
                 self._hold(f"Signed, but not shown: {exc}")
                 return TO_HOME
-            detail = f"shown as {len(frames)} QR frames"
         return self._state_signed(detail, signed["complete"])
 
     def _show_qr_loop(self, frames, delay=0.15):
@@ -2459,7 +2512,14 @@ class Session:
                 stop.wait(delay)
 
     def _state_signed(self, detail, complete=True):
-        """Result screen with SIGN ANOTHER / POWER OFF (Ben, 2026-09-01).
+        """Result screen with SIGN ANOTHER / HOME.
+
+        It offered POWER OFF, and Ben cut it on 2026-09-24: "it's not
+        intuitive and they can just pull the cable if they want to turn
+        it off or do it from home". Powering down stays where a person
+        goes looking for it, in Settings. The C shortcut that also halted
+        from here went with it, so both ways off this screen are the two
+        written on the bar.
 
         `complete` separates a finished transaction from ONE SHARE of
         one. Both are signed, and only one of them can move the money,
@@ -2479,7 +2539,7 @@ class Session:
             if key in ("l", "r"):
                 sel = 1 - sel
             elif key in ("a", "p"):
-                return SIGN_AGAIN if sel == 0 else POWER_OFF
+                return SIGN_AGAIN if sel == 0 else TO_HOME
             elif key == "b":
                 # BACK was dead here. Everywhere else on this device it
                 # leaves the screen, and D7 already settled that leaving
@@ -2487,8 +2547,6 @@ class Session:
                 # button that does nothing is the defect Ben reported off
                 # the board on 2026-09-05, in a different menu.
                 return TO_HOME
-            elif key == "c":
-                return POWER_OFF
 
 
 def main():
