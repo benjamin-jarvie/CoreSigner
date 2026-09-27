@@ -27,52 +27,77 @@ rule is that fixed items leave; the measurements are in the commit.
 
 ## Open
 
-### E-8 BlueWallet cannot import our descriptor QR, and its own parser is why
+### E-8 BlueWallet imports one of our four policies, and hangs on another
 
 Ben scanned the public key export into BlueWallet and it hung (2026-09-24).
-Not a PSBT: the watch-only import.
+Not a PSBT: the watch-only import. Traced against BlueWallet 7.2.0's own
+source, `class/wallets/abstract-wallet.ts` `setSecret()`.
 
 **Our 8-mask cycling is not the cause.** BlueWallet's scanner keys a cache
 on `sha256` of the decoded payload and drops a repeat, so all eight masks
-are one scan to it (`screen/send/ScanQRCode.tsx`, `scannedCache`/`HashIt`,
-v7.2.0). A single static QR of the same text fails the same way, and the
-new hold-a-mask press on the export screen is how a tester shows that.
+are one scan to it (`screen/send/ScanQRCode.tsx`, `scannedCache`/`HashIt`).
+A single static QR of the same text behaves identically, and the
+hold-a-mask press on the export screen is how a tester shows that.
 
-**The cause is BlueWallet's output-descriptor parser**, read at
-`class/wallets/abstract-wallet.ts` 314-331 and traced against our exact
-payload:
+**What actually happens to each descriptor we export:**
 
-- It takes the fingerprint as `secret.substring(indexOf('(')+1, xpubIndex)`
-  up to the first `/`, which on `wpkh([73c5da0a/...` is `[73c5da0a`,
-  **including the bracket**. `Buffer.from('[73c5da0a','hex')` is empty, so
-  `masterFingerprint` becomes `NaN`. The path keeps a trailing `]`.
-- It never strips `/0/*` or the `#checksum`, and `.replace(/\(|\)/, '')`
-  has no `g` flag so it removes one bracket. The string reaching
-  `b58.decode` still holds `/ 0 * # l` and **throws**.
-- `wo1.setSecret(text)` in `class/wallet-import.ts:364` is not inside a
-  try/catch, so the throw escapes the import generator after it has
-  yielded `progress: 'watch only'`. That is the hang: no error is ever
-  shown because nothing catches it.
-- On TESTNET it is worse. `xpubIndex` is
-  `Math.max(indexOf('xpub'), indexOf('ypub'), indexOf('zpub'))`, and
-  `tpub` is in none of them, so the index is -1 and every value derived
-  from it is nonsense.
+| export | BlueWallet 7.2.0 |
+|---|---|
+| mainnet `wpkh` m/84h | imports correctly |
+| mainnet `sh(wpkh)` m/49h | **throws, and the import hangs** |
+| mainnet `pkh` m/44h | fails to import, malformed secret |
+| mainnet `tr` m/86h | fails to import, malformed secret |
+| any testnet | fails to import, no `tpub` support |
 
-**`UR:CRYPTO-OUTPUT` does not help.** BlueWallet decodes it with
-`CryptoOutput.fromCBOR(...).toString()`, which hands the same descriptor
-string to the same parser (`blue_modules/ur/index.js:285`).
+Line 236 strips `[fingerprint/path]` off the front before anything else,
+sets the fingerprint and the path from it, and for m/84h converts the
+xpub to a zpub with `this.secret.split('/')[0]`, which drops our `/0/*`
+and the `#checksum`. That is why native segwit works.
 
-**`UR:CRYPTO-ACCOUNT` is the one path that works.** Its decoder builds the
-zpub itself from the CBOR key, with the right version bytes and the
-origin path (`blue_modules/ur/index.js:228`). BCR-2020-015.
+**The m/49h branch three lines below is missing that `.split('/')[0]`.**
+It hands `xpub…/0/*))#checksum` straight to `_xpubToYpub`, whose
+`b58.decode` throws `Non-base58 character`. `wo1.setSecret(text)` at
+`class/wallet-import.ts:364` is not inside a try/catch, so the throw
+escapes the import generator after it has yielded `progress: 'watch
+only'`, and nothing is ever shown. That is the hang.
 
-Open, and Ben's call. We cannot emit a bare zpub instead: that is a
-base58check re-encode, which PLAN A-22 keeps out of `coresigner/`, and
-Core has no zpub. Adding a crypto-account export is real work and touches
-A-11 and A-22, so it is a decision and not a fix.
+For m/44h and m/86h no conversion runs at all, so the secret keeps
+`/0/*)#checksum` and `valid()` rejects it. The device says it cannot
+import, which is wrong but honest.
 
-This also contradicts E-4's research, which said BlueWallet reads the
-same plain descriptor QR as Sparrow. Sparrow does. BlueWallet does not.
+The output-descriptor branch at line 314, which does have its own bugs
+(it slices the fingerprint with the `[` still attached), is NEVER REACHED
+by our payloads: line 236 has already replaced `this.secret` with the
+xpub. An earlier draft of this entry said that branch was the cause. It
+is not.
+
+**The cheap fix on our side: export the key-origin form**, with no
+wrapper, no `/0/*` and no checksum:
+
+    [73c5da0a/84h/0h/0h]xpub6Bosf…Mdj
+
+Traced: that imports correctly for m/44h, m/49h and m/84h, with the right
+fingerprint and path, and BlueWallet does the ypub/zpub conversion
+itself. It is BIP380 key-origin syntax, not a format we invented, and it
+costs no new code that touches key material: `signer.origin_of` already
+takes the fingerprint and path off a descriptor.
+
+**It must NOT be offered for `tr` or for testnet.** For m/86h a bare
+xpub makes BlueWallet build an `HDLegacyP2PKHWallet` (`init()`,
+watch-only-wallet.ts:77), so it would import "successfully" and show
+LEGACY addresses for a taproot account. A silent wrong-address import is
+worse than a refusal. Testnet cannot work at all: `xpubIndex` searches
+for `xpub`, `ypub` and `zpub` and never `tpub`.
+
+`UR:CRYPTO-OUTPUT` does not help either: BlueWallet decodes it with
+`CryptoOutput.fromCBOR(...).toString()`, back to a descriptor string and
+back into the same path (`blue_modules/ur/index.js:285`).
+
+Open, and Ben's call.
+
+This also corrects E-4's research, which said BlueWallet reads the same
+plain descriptor QR as Sparrow. Sparrow does. BlueWallet reads one of our
+four policies.
 
 ### E-4 The five coordinators are unproven on a device
 
