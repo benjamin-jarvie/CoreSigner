@@ -118,6 +118,78 @@ def main():
                      f"{core_addrs[0][:18]}… x5" if sparrow_addrs == core_addrs
                      else f"{sparrow_addrs[:1]} != {core_addrs[:1]}")
 
+            # --- the ACCOUNT KEY row, `[fingerprint/path]xpub` ----------
+            # Added 2026-09-29. The descriptor above is what Sparrow and
+            # Core read. Measured the same week: BlueWallet 7.2.0 imports
+            # one of our four descriptors and Bitcoin Keeper's thirteen
+            # vendor adapters import none of them (ISSUES.md E-8). Three
+            # of Keeper's adapters read this form instead, and so does
+            # SeedSigner's own "Static" export.
+            key = signer.account_key(desc)
+
+            # What the form is FOR is what it leaves out. Checked against
+            # the descriptor's own characters rather than against the
+            # function that built it (rule 2).
+            r.record(f"{kind}: the account key drops the wrapper, the "
+                     f"branch and the checksum",
+                     ("(" not in key and ")" not in key
+                      and "#" not in key and not key.endswith("*")),
+                     key[:34] + "…")
+
+            # The fingerprint and the path Core itself wrote, pulled out
+            # of Core's string here by a plain split, so this assertion
+            # does not lean on `origin_of` or on `account_key`.
+            inside = desc[desc.index("[") + 1:desc.index("]")]
+            core_fp, core_path = inside.split("/", 1)
+            r.record(f"{kind}: the account key carries Core's own "
+                     f"fingerprint and path",
+                     key.startswith(f"[{core_fp.lower()}/{core_path}]"),
+                     f"[{core_fp}/{core_path}]")
+
+            # Rule 8: ask the counterpart. SparrowScan drives the two
+            # drongo parsers QRScanDialog hands a scanned payload to.
+            #
+            # SPARROW REFUSES THIS FORM, and that is the point of the
+            # assertion. Asked on 2026-09-29 on mainnet, testnet and
+            # regtest, in both the `h` and the `'` spelling: "Unrecognised
+            # extended key header". It reads a BARE xpub and it reads a
+            # descriptor, and the key-origin string between them is
+            # neither. I told Ben it accepted this form. It does not.
+            #
+            # So the two QR rows are not two spellings of one thing. The
+            # descriptor row is the only one Sparrow scans, and the
+            # account key row is the only one Keeper's adapters and
+            # BlueWallet read. Neither row can be dropped. If a future
+            # Sparrow starts accepting this, this check fails and tells
+            # us, which is worth more than asserting what we hope for.
+            f = work / f"{kind}-accountkey.txt"
+            f.write_text(key)
+            scanned = java("SparrowScan", "REGTEST", str(f), tags=("OUT",))
+            said = "\t".join(scanned) if scanned else "nothing"
+            r.record(f"{kind}: Sparrow's scan parsers still refuse the "
+                     f"account key, so the descriptor row has to stay",
+                     said.startswith("REFUSED"), said[:70])
+
+            # The two coordinators whose code I cannot run here, each
+            # transcribed from its own source. Keeper's three adapters
+            # that read this form are character-identical, so one stands
+            # for all three.
+            bw_fp = key[1:9]                       # BlueWallet, line 236
+            bw_path = "m/" + key[10:key.index("]")].replace("h", "'")
+            bw_key = key[key.index("]") + 1:]
+            keeper_key = key[key.index("]") + 1:]  # Keeper seedsigner/index.ts
+            keeper_fp = key[1:9]
+            r.record(f"{kind}: BlueWallet 7.2.0's parser recovers it",
+                     bw_fp == core_fp.lower()
+                     and bw_path.startswith("m/" + core_path.split("/")[0]
+                                            .replace("h", "'"))
+                     and bw_key.startswith(("xpub", "tpub")),
+                     f"{bw_fp} {bw_path} {bw_key[:8]}")
+            r.record(f"{kind}: Bitcoin Keeper's adapter recovers it",
+                     keeper_fp == core_fp.lower()
+                     and keeper_key.startswith(("xpub", "tpub")),
+                     f"{keeper_fp} {keeper_key[:8]}")
+
         # The KEY scan, with real key material and a real decoder.
         # TESTING.md rule 1 wants real domain data through the surface, and
         # rule 8 wants the counterpart's decoder. test_keyscan.py drives the

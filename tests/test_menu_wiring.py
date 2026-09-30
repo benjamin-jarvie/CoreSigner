@@ -134,14 +134,17 @@ for i, (label, _note) in enumerate(screens.KEYS_ACTIONS):
         bad(f"KEYS: '{label}' runs {got}, not {want}")
 
 
-# --- 4. how a key leaves: three routes, dispatched by index -------------
-# `_export_one` picks with `[qr, text, file][choice]`, which is the exact
-# shape TESTING.md rule 11 was written about: a list of labels in screens
-# and a positional dispatch in main, with nothing joining them.
+# --- 4. how a key leaves: four routes, dispatched by index -------------
+# `_export_one` picks with `[qr, account, text, file][choice]`, which is
+# the exact shape TESTING.md rule 11 was written about: a list of labels
+# in screens and a positional dispatch in main, with nothing joining
+# them. A fourth row went in on 2026-09-29 and this is what catches it
+# landing on the wrong handler.
 
 def run_export(sess):
     ran = []
-    recorder(sess, ("_export_qr", "_export_text", "_export_file"), ran)
+    recorder(sess, ("_export_qr", "_export_account_qr", "_export_text",
+                    "_export_file"), ran)
     # A finished export goes on to the addresses, which is D2's decision
     # and not this suite's business: what is under test is WHICH route ran.
     sess._page_addresses = lambda *a, **k: None
@@ -149,9 +152,13 @@ def run_export(sess):
     return ran[0] if ran else "nothing"
 
 
-coresigner_main.signer.export_descriptor = lambda *a, **k: "wpkh(tpubX)#aaaaaaaa"
+coresigner_main.signer.export_descriptor = lambda *a, **k: (
+    "wpkh([73c5da0a/84h/1h/0h]tpubDC3Amaq5HtW8qxGoTwyDBaD12LoZ6xXuHGKo3"
+    "34cLm2yJAze7kU9fmKkfYgMy6jvCRUxQxQ9FruBfEytY5sQE5RBex8X4nEY8W26B9"
+    "KYvzF/0/*)#85lfyknl")
 pin("EXPORT AS", screens.EXPORT_OPTIONS, run_export, {
-    "QR code": "_export_qr",
+    "QR, descriptor": "_export_qr",
+    "QR, account key": "_export_account_qr",
     "Text to type": "_export_text",
     "Wallet file": "_export_file",
 })

@@ -452,6 +452,42 @@ def origin_of(descriptor: str) -> "tuple[str, str]":
     return (m.group(1).lower(), "m" + m.group(2)) if m else ("", "")
 
 
+def account_key(descriptor: str) -> str:
+    """The KEY-ORIGIN form of a descriptor: `[fingerprint/path]xpub`.
+
+    Core hands us a whole descriptor, and a descriptor is not what
+    coordinators read. Measured on 2026-09-29 against two of them:
+
+    * BlueWallet 7.2.0 imports our `wpkh` descriptor and NOTHING else.
+      `sh(wpkh(…))` throws inside a `setSecret` that nothing catches, and
+      the import hangs (ISSUES.md E-8).
+    * Bitcoin Keeper carries THIRTEEN vendor adapters and not one of them
+      parses a descriptor. Its SeedSigner, Specter and Krux adapters all
+      read this form, character for character the same way.
+
+    SeedSigner ships exactly this string as its "Static" xpub QR, built
+    in `models/encode_qr.py`. It is BIP380 key-origin syntax, so it is a
+    published form and not one we invented.
+
+    What is LEFT OUT is the point. No script wrapper, no `/0/*` and no
+    `#checksum`: those three are what every coordinator either strips
+    differently or fails to strip at all.
+
+    Returns "" when Core wrote no origin, the way `origin_of` does. A
+    descriptor with no origin has no account key to name.
+
+    This reads a string CORE PRODUCED, not one that arrived from
+    outside, so A-11 is untouched: Bitcoin Core is still the only thing
+    here that parses untrusted bytes.
+    """
+    # The base58 run after the bracket. Excludes 0, O, I and l, so it
+    # stops at the `/` that starts `/0/*` without having to know that is
+    # what follows.
+    m = re.search(r"\[([0-9a-fA-F]{8}(?:/\d+[h']?)+)\]"
+                  r"([1-9A-HJ-NP-Za-km-z]+)", descriptor)
+    return f"[{m.group(1).lower()}]{m.group(2)}" if m else ""
+
+
 def available_kinds(rpc: "Rpc", wallet: str = WALLET) -> tuple[str, ...]:
     """The script policies THIS key actually has, in EXPORT_ORDER.
 

@@ -82,18 +82,47 @@ itself. It is BIP380 key-origin syntax, not a format we invented, and it
 costs no new code that touches key material: `signer.origin_of` already
 takes the fingerprint and path off a descriptor.
 
-**It must NOT be offered for `tr` or for testnet.** For m/86h a bare
-xpub makes BlueWallet build an `HDLegacyP2PKHWallet` (`init()`,
-watch-only-wallet.ts:77), so it would import "successfully" and show
-LEGACY addresses for a taproot account. A silent wrong-address import is
-worse than a refusal. Testnet cannot work at all: `xpubIndex` searches
-for `xpub`, `ypub` and `zpub` and never `tpub`.
-
 `UR:CRYPTO-OUTPUT` does not help either: BlueWallet decodes it with
 `CryptoOutput.fromCBOR(...).toString()`, back to a descriptor string and
 back into the same path (`blue_modules/ur/index.js:285`).
 
-Open, and Ben's call.
+**Bitcoin Keeper says the same thing from a separate codebase.** It
+carries THIRTEEN vendor adapters under `src/hardware/`, and they reduce
+to three payload shapes: key-origin text (SeedSigner, Specter, Krux),
+JSON skeleton (Passport, ColdCard), and a decoded UR object (Keystone,
+Jade). **Not one of the thirteen parses an output descriptor.** Its
+SeedSigner adapter does `qrData.slice(qrData.indexOf(']') + 1)`, so our
+`/0/*)#checksum` rides into the xpub and breaks it, the same failure
+shape as BlueWallet.
+
+**FIXED 2026-09-29 by adding a second QR row**, `QR, account key`, which
+sends `signer.account_key(desc)`. The descriptor row stays.
+
+**Both rows are needed, and the measurement is why.** Asked directly on
+2026-09-29, Sparrow's scan parsers REFUSE the key-origin form on
+mainnet, testnet and regtest, in both the `h` and the `'` spelling:
+"Unrecognised extended key header". Sparrow reads a bare xpub and it
+reads a descriptor, and the string between them is neither. So the
+descriptor row is the only one Sparrow scans and the account key row is
+the only one Keeper and BlueWallet read.
+`tests/sparrow/test_export_interop.py` pins both facts per policy, and
+the Sparrow one is written to fail if a future Sparrow starts accepting
+it.
+
+**No policy is blocked on the new row**, and taproot is what makes that
+a decision. An account key names its path, so a coordinator that reads
+the path gets taproot right: Keeper derives the purpose from it. One
+that ignores the path can build the wrong kind of wallet, and BlueWallet
+is such a one: a bare xpub at m/86h makes it an `HDLegacyP2PKHWallet`
+(`watch-only-wallet.ts:77`), showing legacy addresses for a taproot
+account. The guard is the one already in the flow: the three addresses
+shown after EVERY export are what a person compares against their
+coordinator. Refusing the row would break the coordinators that are
+correct to protect the ones that are not.
+
+Still open: BlueWallet cannot reach testnet in any format, because
+`xpubIndex` searches for `xpub`, `ypub` and `zpub` and never `tpub`.
+That one needs a patch to BlueWallet.
 
 This also corrects E-4's research, which said BlueWallet reads the same
 plain descriptor QR as Sparrow. Sparrow does. BlueWallet reads one of our

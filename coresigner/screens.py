@@ -1026,8 +1026,19 @@ def cosigner_options(w, h, selected=0):
 # type"). This is not the coordinator chooser that was cut: that one asked
 # a question with the same answer four times out of five, and this one
 # picks between photons, your fingers, and a file.
+#: TWO QR rows, and they carry different text. Coordinators do not agree
+#: on one payload, and pretending they do is what E-4 got wrong: measured
+#: on 2026-09-29, BlueWallet reads one of our four descriptors and Bitcoin
+#: Keeper's thirteen vendor adapters read none of them. Three of Keeper's
+#: adapters read the account key, so does Sparrow, and so does the one
+#: BlueWallet path that works.
+#:
+#: The rows name the FORMAT and not the wallet. Naming wallets is a claim
+#: about software we do not control and cannot keep true, which is the
+#: shape of the E-4 mistake. A format is a fact about the bytes we send.
 EXPORT_OPTIONS = [
-    ("QR code", ""),
+    ("QR, descriptor", "says which addresses"),
+    ("QR, account key", "the wallet decides"),
     ("Text to type", ""),
     ("Wallet file", "for Bitcoin Core"),
 ]

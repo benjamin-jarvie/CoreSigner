@@ -1025,7 +1025,7 @@ class Session:
             len(screens.EXPORT_OPTIONS))
         if choice is None:
             return False
-        shown = [self._export_qr, self._export_text,
+        shown = [self._export_qr, self._export_account_qr, self._export_text,
                  self._export_file][choice](name, desc, kind)
         if not shown:
             return False
@@ -1035,6 +1035,33 @@ class Session:
         # themselves at the end of one (Ben, both times).
         self._page_addresses(name, kind, limit=3)
         return True
+
+    def _export_account_qr(self, name, desc, kind):
+        """The same QR screen, carrying the account key.
+
+        `signer.account_key` says why this form exists and who reads it.
+        The descriptor row stays for Sparrow and for Core, which both
+        take one; this row is for everything that does not.
+
+        NO POLICY IS BLOCKED HERE, and taproot is the case that makes
+        that a decision rather than an oversight. An account key names
+        the path, so a coordinator that reads the path gets taproot
+        right: Keeper derives the purpose from it and Sparrow asks. One
+        that ignores the path can build the wrong kind of wallet from
+        it. The guard against that is the one already in this flow: the
+        three addresses shown after EVERY export are what a person
+        compares against their coordinator, and a wallet that built the
+        wrong thing shows different ones. Refusing the row would break
+        the coordinators that are correct in order to protect the ones
+        that are not.
+        """
+        key = signer.account_key(desc)
+        if not key:
+            # Core wrote no origin, so there is no path to send and a
+            # bare key would be a guess about where it sits.
+            self._hold("This key has no origin. Use the descriptor")
+            return False
+        return self._export_qr(name, key, kind)
 
     #: How long each masked render of the export QR is held. Slow enough
     #: that a scanner locks on one frame rather than straddling two, and
