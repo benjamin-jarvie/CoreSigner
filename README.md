@@ -88,11 +88,13 @@ server off by default, and its Debug Console sits inside the binary the
 eleven signatures already cover.
 
 **So the case for this device is narrow, and it is physical.** A keyboard
-and a monitor are hard to secure against somebody who reaches your desk
-while you are away, and both are easy to tamper with. A sealed box with a
-small screen and four buttons is easier to keep and easier to carry.
-Where you can trust the peripherals, the reference GUI is the better
-answer. Where you cannot, this device is one of the remaining options.
+is a cable with a chip in it that somebody who reaches your desk can
+replace, and a hardware keylogger records the words you type into the
+GUI as readily as the GUI reads them. A sealed box with a small screen
+and four buttons is easier to keep, easier to carry, and typing a key
+into it leaves no cable to tap. Where you can secure the peripherals,
+the reference GUI is the better answer. Where you cannot, the choice is
+between this and the air-gapped laptop above.
 
 Core Signer is Core **plus** a body of new code that draws screens, reads
 buttons and moves bytes. That code is young. It has one author and an
