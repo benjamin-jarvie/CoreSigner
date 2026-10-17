@@ -33,8 +33,17 @@ if ! command -v bitcoind >/dev/null || ! bitcoind --version | grep -q "v$CORE_VE
     trap 'rm -rf "$work"' EXIT
     curl -fSL -o "$work/$CORE_TARBALL" "$CORE_URL"
     echo "$CORE_SHA256  $work/$CORE_TARBALL" | sha256sum -c -
-    # Only the two binaries Core Signer runs. bitcoin-qt and test_bitcoin are most
-    # of the archive by size and neither is ever executed.
+    # Only the two binaries Core Signer runs, and the tarball goes with
+    # the temp directory below. bitcoin-qt has never been installed on a
+    # card: `git log -S "bin/bitcoin-qt" -- image/provision.sh` is empty.
+    #
+    # It is in the download because Core publishes ONE Linux archive per
+    # platform, holding the node, the GUI, the CLI and the tools, with no
+    # GUI-less variant to ask for. The sha256 we verify is the whole
+    # archive's, so all 178.6MB is fetched to check the 19MB we keep.
+    # bitcoin-qt and libexec/bitcoin-gui are 87.3MB of it and
+    # libexec/test_bitcoin another 32.2MB (measured 2026-10-16); none of
+    # the three is ever executed here.
     tar xzf "$work/$CORE_TARBALL" -C "$work" \
         "bitcoin-$CORE_VERSION/bin/bitcoind" "bitcoin-$CORE_VERSION/bin/bitcoin-cli"
     install -m 755 "$work/bitcoin-$CORE_VERSION/bin/bitcoind" \
