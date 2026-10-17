@@ -71,9 +71,17 @@ and throws the GUI away. The primary build's carrier has full-size HDMI
 and USB-A onboard ([ORDER.md](ORDER.md)). So Core's own reviewed
 interface runs on this hardware, from a desktop card instead of ours,
 with nothing of ours between you and the key. **If you can secure a
-keyboard and a monitor, use that instead of Core Signer.** This document
-will never tell you otherwise. (Westgate again,
-[issue #10](https://github.com/benjamin-jarvie/corky/issues/10).)
+keyboard and a monitor, use that instead of Core Signer.** (Westgate
+again, [issue #10](https://github.com/benjamin-jarvie/CoreSigner/issues/10).)
+
+**That alternative is `bitcoin-qt` alone, and it replaces all of this.**
+`bitcoin-qt` is the same node and the same wallet as `bitcoind` with a
+window on the front, so nothing runs beside it: one binary, and the
+Debug Console inside it for anything the menus do not reach. Core Signer
+runs the other two instead, `bitcoind` wallet-only and offline and
+`bitcoin-cli` to drive it, because this device has no keyboard to type
+into a console and no desktop to draw a window on. The GUI is most of
+the archive by size and we discard every byte of it.
 
 Core's own documentation says why that ordering is right.
 [`doc/JSON-RPC-interface.md`](https://github.com/bitcoin/bitcoin/blob/master/doc/JSON-RPC-interface.md),

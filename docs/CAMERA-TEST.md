@@ -41,7 +41,7 @@ aimed at the screen.
 
 ## Part A. The device's camera reads a QR
 
-    ssh corky-ip
+    ssh coresigner-ip
     sudo python3 /opt/coresigner/tests/hw_camera.py --seconds 90
 
 Paints the viewfinder on the LCD and names every QR it decodes. Show it
