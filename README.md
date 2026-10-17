@@ -101,10 +101,10 @@ eleven signatures already cover.
 
 **So the case for this device is narrow, and it is physical.** A keyboard
 is a cable with a chip in it that somebody who reaches your desk can
-replace, and a hardware keylogger records the words you type into the
-GUI as readily as the GUI reads them. A sealed box with a small screen
-and four buttons is easier to keep, easier to carry, and typing a key
-into it leaves no cable to tap. Where you can secure the peripherals,
+replace, and a hardware keylogger sits between the keys and the board,
+so it reads every character before Core does. A sealed box with a small
+screen and four buttons is easier to keep, easier to carry, and typing a
+key into it leaves no cable to tap. Where you can secure the peripherals,
 the reference GUI is the better answer. Where you cannot, the choice is
 between this and the air-gapped laptop above.
 
