@@ -96,17 +96,26 @@ def main():
         xprv_file.write_text(XPRV)
         frames_file = work / "psbt_frames.txt"
         frames_file.write_text("\n".join(qrchannel.psbt_to_frames(fund_psbt(1.0))))
-        r = run_device(datadir, "ra" + "da" + "a" + "bb" + "a" + "a" + "ra", work / "framesB",
+        # TWO review presses: a funded PSBT has a destination and a
+        # change output, which is a page each, and the first A advances
+        # to the unseen one rather than signing. That guard is the point
+        # of the screen.
+        r = run_device(datadir,
+                       "ra" + "da" + "a" + "bb" + "a" + "aa" + "ra" + "draa",
+                       work / "framesB",
                        qr_key=xprv_file, qr_psbt=frames_file)
         assert r.returncode == 0, f"B failed rc={r.returncode}:\n{r.stderr[-1200:]}"
         shots = sorted((work / "framesB").glob("frame-*.png"))
         assert len(shots) > 6, "B: expected QR output frames on screen"
-        lastb = shots[-1].read_bytes()
-        assert any(lastb == _render(scr.result, ok=True,
-                                    detail=f"shown as {n} QR frames",
-                                    actions_sel=1, label="SIGNED",
-                                    note="ready to send")
-                   for n in range(1, 80)), "B: final frame not a QR-out result"
+        # detail is None on this path: the PSBT left as QR frames, so
+        # there is no file to name (main._sign_and_deliver leaves detail
+        # unset and _state_signed passes it through). The screen is drawn
+        # twice, once per action, and either is proof it was reached.
+        assert any(_has(work / "framesB",
+                        _render(scr.result, ok=True, detail=None,
+                                actions_sel=sel, label="SIGNED",
+                                note="ready to send"))
+                   for sel in (0, 1)), "B: the QR-out result never showed"
         print(f"ok   B: xprv QR (warning screen shown) -> PSBT via QR -> signed QR out ({len(shots)} frames)")
 
 
@@ -120,9 +129,17 @@ def main():
         (stickd / "many.psbt").write_bytes(base64.b64decode(many))
         key_file2 = work / "key2.txt"
         key_file2.write_text(XPRV)
-        # 5 outputs = 3 pages at two per page: forced 'a' walks pages 2
-        # and 3, the fourth 'a' signs
-        r = run_device(datadir, "ra" + "da" + "a" + "bb" + "a" + "aaa" + "ra", work / "framesD",
+        # ONE OUTPUT A PAGE since 2026-09-25, so four destinations and a
+        # change output are five pages. DERIVED: each A with a page still
+        # unseen advances instead of signing, so it takes one press per
+        # page, the last of which signs. Written as 3 here while the
+        # device believed the same wrong number, and both are fixed now.
+        info_d = signer.describe_psbt(rpc, many)
+        outs_d = [(o["address"], o["amount_btc"]) for o in info_d["outputs"]]
+        review_d = "a" * scr.review_pages(outs_d)
+        r = run_device(datadir,
+                       "ra" + "da" + "a" + "bb" + "a" + review_d + "ra"
+                       + "draa", work / "framesD",
                        stick=stickd, qr_key=key_file2)
         assert r.returncode == 0, f"D failed:\n{r.stderr}"
         assert (stickd / "many-signed.psbt").exists(), "D: signed file missing"
@@ -162,9 +179,16 @@ def main():
                          0, {"fee_rate": 10}, True, wallet="watch")["psbt"]
         (stickd3 / "many.psbt").write_bytes(base64.b64decode(many3))
         key_sq4 = work / "key4.txt"; key_sq4.write_text(XPRV)
-        # review: d,u,d,d touch pages 1,0,1,2 -> all three seen via nav
-        r = run_device(datadir, "ra" + "da" + "a" + "bb" + "a" + "dudda" + "ra", work / "framesD3",
-                       stick=stickd3, qr_key=key_sq4)
+        # DOWN then UP exercises both directions, and the sweep of DOWNs
+        # after it visits every page whatever the count is, because the
+        # paging wraps. DERIVED: one output a page since 2026-09-25, so
+        # a hand-written "dudda" saw three of five.
+        info3n = signer.describe_psbt(rpc, many3)
+        outs3n = [(o["address"], o["amount_btc"]) for o in info3n["outputs"]]
+        nav3 = "du" + "d" * (scr.review_pages(outs3n) - 1) + "a"
+        r = run_device(datadir,
+                       "ra" + "da" + "a" + "bb" + "a" + nav3 + "ra" + "draa",
+                       work / "framesD3", stick=stickd3, qr_key=key_sq4)
         assert r.returncode == 0, f"D3 failed:\n{r.stderr}"
         assert (stickd3 / "many-signed.psbt").exists(), "D3: nav-sign missing"
         # wraparound: u from page0 lands on page2 ((0-1)%3), u again on 1
@@ -174,26 +198,65 @@ def main():
                          0, {"fee_rate": 10}, True, wallet="watch")["psbt"]
         (stickd4 / "many.psbt").write_bytes(base64.b64decode(many4))
         key_sq5 = work / "key5.txt"; key_sq5.write_text(XPRV)
-        r = run_device(datadir, "ra" + "da" + "a" + "bb" + "a" + "uua" + "ra", work / "framesD4",
-                       stick=stickd4, qr_key=key_sq5)
+        # UP twice from the first page is the wraparound: it lands on the
+        # last page and then the one before it. The sweep that follows
+        # sees the rest, because paging wraps either way.
+        info4n = signer.describe_psbt(rpc, many4)
+        outs4n = [(o["address"], o["amount_btc"]) for o in info4n["outputs"]]
+        nav4 = "uu" + "d" * (scr.review_pages(outs4n) - 1) + "a"
+        r = run_device(datadir,
+                       "ra" + "da" + "a" + "bb" + "a" + nav4 + "ra" + "draa",
+                       work / "framesD4", stick=stickd4, qr_key=key_sq5)
         assert r.returncode == 0, f"D4 failed:\n{r.stderr}"
         assert (stickd4 / "many-signed.psbt").exists(), "D4: wraparound broken"
         print("ok   D3/D4: paging navigation u/d + wraparound exercised")
 
 
-        # ---- Session R3: 2-output PSBT is exactly ONE page ----
-        # pages = (len+1)//2 : 2 outputs -> 1 page, a single 'a' signs.
+        # ---- Session R3: 2-output PSBT is exactly TWO pages ----
+        # It was one page, on `pages = (len(outputs) + 1) // 2`. The
+        # review went to ONE OUTPUT A PAGE on 2026-09-25, when the whole
+        # address started being shown in fours and two of them would not
+        # fit, so a funded PSBT's destination and its change are a page
+        # each. The old session asserted the count in its own print,
+        # which is a claim and not a check, and it stayed wrong for three
+        # weeks. It is asserted below now.
         stickr = work / "stickR3"; stickr.mkdir()
         p3 = rpc.call("walletcreatefundedpsbt", [],
                       [{rpc.call("getnewaddress", wallet="watch"): 0.1}],
                       0, {"fee_rate": 10}, True, wallet="watch")["psbt"]
         (stickr / "p3.psbt").write_bytes(base64.b64decode(p3))
         key_sqr = work / "sq_r3.txt"; key_sqr.write_text(XPRV)
-        r = run_device(datadir, "ra" + "da" + "a" + "bb" + "a" + "a" + "ra", work / "framesR3",
-                       stick=stickr, qr_key=key_sqr)
+        # Two pages, so two presses: the first advances to the change
+        # output and the second signs.
+        r = run_device(datadir,
+                       "ra" + "da" + "a" + "bb" + "a" + "aa" + "ra" + "draa",
+                       work / "framesR3", stick=stickr, qr_key=key_sqr)
         assert r.returncode == 0, f"R3 failed:\n{r.stderr}"
-        assert (stickr / "p3-signed.psbt").exists(), "R3: 2-out page count wrong"
-        print("ok   R3: 2-output PSBT reviewed as one page and signed")
+        assert (stickr / "p3-signed.psbt").exists(), \
+            "R3: the 2-output PSBT was not signed"
+        # The count, measured off the panel rather than claimed. Both
+        # pages must have been drawn, which is the whole point of the
+        # screen: the second output here is the change, and a review that
+        # signs without showing it is the defect this found.
+        info3 = signer.describe_psbt(rpc, p3)
+        outs3 = [(o["address"], o["amount_btc"]) for o in info3["outputs"]]
+        assert scr.review_pages(outs3) == 2, \
+            f"R3: {len(outs3)} outputs is {scr.review_pages(outs3)} pages"
+        ours3 = None
+        for page in (0, 1):
+            assert any(_has(work / "framesR3",
+                            _render(scr.review, outs3, info3["fee_btc"],
+                                    input_total_btc=info3["input_total_btc"],
+                                    page=page, unseen_pages=unseen,
+                                    quorum=info3["quorum"],
+                                    cosigners=info3["cosigners"],
+                                    ours=ours3,
+                                    timelocks=info3["timelocks"],
+                                    spend_lock=info3["spend_lock"]))
+                        for unseen in (False, True)), \
+                f"R3: the review never drew page {page + 1} of 2"
+        print("ok   R3: a 2-output PSBT is two review pages, both drawn, "
+              "and it signs")
 
         # ---- Session I: incomplete QR assembly, then abort at load ----
         allframes = qrchannel.psbt_to_frames(fund_psbt(1.0))
@@ -257,8 +320,14 @@ def main():
 
 
 
-        # ---- Session N: 3-page review, page ORDER pinned frame-by-frame --
-        def paged_run(tag, navkeys):
+        # ---- Session N: the review's page ORDER, pinned frame by frame --
+        # DERIVED, both the keys and the expected order. It was written
+        # for four pages at two outputs each, and when the screen went to
+        # one output a page it had seven. It kept passing: it only ever
+        # looked for the first four and found them in order, so three
+        # pages went unchecked and the stale count sat in an assertion
+        # about its own arithmetic.
+        def paged_run(tag, mode):
             st = work / ("stickN" + tag); st.mkdir()
             pn = rpc.call("walletcreatefundedpsbt", [],
                           [{rpc.call("getnewaddress", wallet="watch"): 0.05}
@@ -275,7 +344,9 @@ def main():
                          if k.name == wname), None)
             signer.close_session(rpc)
             outs = [(o["address"], o["amount_btc"]) for o in info["outputs"]]
-            assert (len(outs) + 1) // 2 == 4, "N: expected exactly 4 pages"
+            n_pages = scr.review_pages(outs)
+            assert n_pages == len(outs), \
+                f"N: {len(outs)} outputs should be {len(outs)} pages"
             # Each page has two renders now: the plain one, and the one
             # that says why SIGN was refused (unseen pages remain).
             pages = [[_render(scr.review, outs, info["fee_btc"],
@@ -284,10 +355,18 @@ def main():
                               quorum=info["quorum"],
                               cosigners=info["cosigners"], ours=ours)
                       for refused in (False, True)]
-                     for i in range(4)]
+                     for i in range(n_pages)]
             key_sq = work / ("key_n" + tag + ".txt")
             key_sq.write_text(XPRV)
-            r = run_device(datadir, "ra" + "da" + "a" + "bb" + "a" + navkeys + "ra",
+            # "nav" walks every page with DOWN and then signs; "forced"
+            # presses A throughout, which advances instead of signing
+            # while a page is unseen and carries the banner that says so.
+            navkeys = ("d" * (n_pages - 1) + "a" if mode == "nav"
+                       else "a" * n_pages)
+            want = ([(i, False) for i in range(n_pages)] if mode == "nav"
+                    else [(0, False)]
+                    + [(i, True) for i in range(1, n_pages)])
+            r = run_device(datadir, "ra" + "da" + "a" + "bb" + "a" + navkeys + "ra" + "draa",
                            work / ("framesN" + tag), stick=st, qr_key=key_sq)
             assert r.returncode == 0, f"N{tag} failed:\n{r.stderr}"
             assert (st / "n-signed.psbt").exists(), f"N{tag}: sign missing"
@@ -298,16 +377,15 @@ def main():
                     if raw in variants:
                         # (page, refused): variants[1] carries the banner.
                         seq.append((i, variants.index(raw) == 1))
-            return seq
-        # navigate d,d,d then sign: four plain renders, never the banner
-        assert paged_run("1", "ddda") == [(0, False), (1, False), (2, False),
-                                          (3, False)], \
-            "N1: page navigation order or refusal state drifted"
-        # forced advance a,a,a,a: each unseen page must carry the banner
-        assert paged_run("2", "aaaa") == [(0, False), (1, True), (2, True),
-                                          (3, True)], \
-            "N2: forced advance must show the refusal banner on unseen pages"
-        print("ok   N: 4-page review order pinned (nav and forced advance)")
+            return seq, want, n_pages
+        seq1, want1, n1 = paged_run("1", "nav")
+        assert seq1 == want1, \
+            f"N1: page order or refusal state drifted: {seq1} != {want1}"
+        seq2, want2, n2 = paged_run("2", "forced")
+        assert seq2 == want2, \
+            f"N2: forced advance must band every unseen page: {seq2}"
+        print(f"ok   N: {n1}-page review order pinned, every page checked "
+              "(nav and forced advance)")
 
 
         # ---- Session T: a real xprv typed on the grid (S3) ----
@@ -384,12 +462,13 @@ def main():
                       0, {"fee_rate": 10}, True, wallet="watch")["psbt"]
         (stickt / "typed.psbt").write_bytes(base64.b64decode(pt))
         # Keys -> Type private key (third row) -> type it -> back out to home ->
-        # Sign tile -> sign -> POWER OFF.
+        # Sign tile -> sign -> home -> Settings -> POWER OFF.
         r = run_device(datadir,
                        # The grid opens holding the master prefix, so
                        # only what follows it is typed (Ben, 2026-09-19).
                        "ra" + "dda" + text_keys("xprv", typed_xprv[16:])
-                       + "bb" + "a" + "a" + "ra",
+                       # Two review pages: the destination and the change.
+                       + "bb" + "a" + "aa" + "ra" + "draa",
                        work / "framesT", stick=stickt)
         assert r.returncode == 0, f"T failed:\n{r.stderr}"
         assert (stickt / "typed-signed.psbt").exists(), \

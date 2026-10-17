@@ -471,12 +471,12 @@ command line, so it is never in a process listing. And on the way out to
 paper, as characters on the panel. Between those, the key lives in
 Bitcoin Core and in a ramdisk, and power-off ends both.
 
-**What an auditor reads: 3,119 lines, in one directory.** The whole
+**What an auditor reads: 3,121 lines, in one directory.** The whole
 shipped program is [`coresigner/`](coresigner/), and it is eight files.
 Core's two binaries do the cryptography and are not ours.
 [`hw/vendor/`](hw/vendor/) holds 1,868 lines that are not ours either,
 pinned by hash and compared with upstream.
-[`tests/`](tests/) holds 8,327 lines that never ship: they run on a
+[`tests/`](tests/) holds 8,372 lines that never ship: they run on a
 laptop, and they are what you read to check the claims on this page
 rather than what you read to check the device.
 
@@ -498,7 +498,7 @@ Both are the official builds, pinned by sha256 in
 from the server that served the binary, and re-verified from a fresh
 download on 2026-09-08. That is the layer that does the cryptography,
 and the reason this project exists is that it has thousands of readers
-and Core Signer's 3,119 lines do not.
+and Core Signer's 3,121 lines do not.
 
 Layer 1 being empty is enforced, not asserted.
 [`tests/test_integrity.py`](tests/test_integrity.py) fails if any shipped
@@ -506,7 +506,7 @@ module imports `hashlib`, `hmac`, `secrets`, `random` or any curve
 library, if `os.urandom` appears anywhere, or if key-derivation
 vocabulary comes back.
 
-**Layer 2 sees secrets, computes nothing with them. 2851 lines.**
+**Layer 2 sees secrets, computes nothing with them. 2853 lines.**
 [`main.py`](coresigner/main.py), [`signer.py`](coresigner/signer.py),
 [`screens.py`](coresigner/screens.py) and
 [`qrsource.py`](coresigner/qrsource.py) carry the key.
@@ -560,8 +560,8 @@ Core an opaque string, and the one exception is documented at the top of
 payload, which is bounded by a length cap and a charset check before any
 container code runs.
 
-**Total functional code: 3,119 lines** (7,036 with blanks/comments).
-**Test code: 8,327 lines**, none of which ships.
+**Total functional code: 3,121 lines** (7,052 with blanks/comments).
+**Test code: 8,372 lines**, none of which ships.
 **Vendored, not ours: 1,868 lines** in [`hw/vendor/`](hw/vendor/): the
 BC-UR animated-QR codec, which is Blockchain Commons' by way of
 SeedSigner and is unmodified, and SeedSigner's ST7789 display driver,
@@ -645,19 +645,17 @@ Said before critics find it:
 need a real `bitcoind`. The rules that came out of being wrong are in
 [TESTING.md](TESTING.md).
 
-- **81% of `coresigner/`** executes under test, measured across both
-  architectures by `tools/coverage_run.sh` on 2026-10-16: 417 of 2,608
+- **87% of `coresigner/`** executes under test, measured across both
+  architectures by `tools/coverage_run.sh` on 2026-10-17: 288 of 2,610
   statements never ran. Every uncovered line is sorted into one of three
   piles with exactly one statement unreachable
-  ([A5](docs/wayfinder/beta-audit/tickets/A5-never-run.md)).
+  ([A5](docs/wayfinder/beta-audit/tickets/A5-never-run.md)). The script
+  fails if this page states a figure it did not just measure.
 
-  **That is a floor, and it is lower than it should be.** This page said
-  86% until 2026-10-16, which is what A5 measured over 2,028 statements
-  when the whole suite was green. Today `tests/e2e_session.py` and
-  `tests/e2e_keys.py` fail before their device sessions run, and those
-  sessions are what cover most of `main.py`, so the figure above is
-  missing them. Both failures are open and neither is in this list of
-  things the suite proves.
+  It read 81% on 2026-10-16, and the six points were two suites. The
+  device sessions in `tests/e2e_session.py` and `tests/e2e_keys.py` had
+  been dying on their first scripted press since 2026-09-25 and are what
+  cover most of `main.py`. They run again.
 - **21 scripted device sessions** drive the real keypad and assert what
   the panel actually painted.
 - **7 adversarial attack scenarios**, including a hostile stick, a FIFO,

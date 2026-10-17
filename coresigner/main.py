@@ -2403,7 +2403,7 @@ class Session:
         # which wallet this signature is for, and who else is in it.
         ours = next((k.xfp for k in self.keys if k.name == wallet), None)
         outs = [(o["address"], o["amount_btc"]) for o in info["outputs"]]
-        pages = max(1, (len(outs) + 1) // 2)
+        pages = screens.review_pages(outs)
         page, seen, refused, sel = 0, {0}, False, 1
         while True:
             self.display.show(screens.review(

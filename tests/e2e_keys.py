@@ -311,7 +311,9 @@ def main():
         # load A by QR; the QR transaction belongs to B, nobody owns it,
         # dismiss; load B by typing its xprv; the same transaction now finds
         # B among two keys: the key screen appears with B pre-selected,
-        # confirm, review, sign, QR out, power off.
+        # confirm, review, sign, QR out, home, power off. The result screen
+        # stopped offering POWER OFF on 2026-09-24, so the walk to
+        # Settings is part of every script that ends there now.
         script = ("ra" + keys_press(0, "Scan a key") + "a"   # Keys -> Scan -> warning
                   + "b" + "b"                     # key menu -> Keys -> home
                   + "a" + "a"                     # Sign tile: nobody owns it, dismiss
@@ -319,7 +321,11 @@ def main():
                   + entry_keys(xprv_b)
                   + "b" + "b"                     # key menu -> Keys -> home
                   + "a"                           # Sign tile
-                  + "a" + "a" + "ra")             # confirm B, sign, power off
+                  # Two review pages, destination and change, since the
+                  # screen went to one output a page: confirm B, advance
+                  # to the change, then sign.
+                  + "a" + "aa" + "ra"            # confirm B, sign, go home
+                  + "draa")                       # Settings -> power off
         r = run_device(datadir, script, work / "framesK2",
                        qr_key=key_a, qr_psbt=frames_b)
         assert r.returncode == 0, f"K2 failed:\n{r.stderr[-1500:]}"
@@ -329,11 +335,14 @@ def main():
         assert _has(work / "framesK2", _render(
             scr.choose_key, [("coresigner", xfp_a), ("coresigner-2", xfp_b)], {xfp_b}, 1)), \
             "K2: the key screen with B pre-selected was never shown"
-        last = _shots(work / "framesK2")[-1].read_bytes()
-        assert any(last == _render(scr.result, ok=True,
-                                   detail=f"shown as {n} QR frames", actions_sel=1,
-                                   label="SIGNED", note="ready to send")
-                   for n in range(1, 80)), "K2: final frame is not a signed result"
+        # SHOWN, not last. The PSBT leaves as QR frames so there is no
+        # file to name and detail is None, and the walk to Power off is
+        # drawn after the result since 2026-09-24.
+        assert any(_has(work / "framesK2",
+                        _render(scr.result, ok=True, detail=None,
+                                actions_sel=sel, label="SIGNED",
+                                note="ready to send"))
+                   for sel in (0, 1)), "K2: the signed result never showed"
         print("ok   K2: two keys loaded; the transaction's owner is found and signs")
 
         # ---- Session K3: every menu, walked (tickets 02, 05, 07) ----
@@ -454,10 +463,23 @@ def main():
         script = ("ra" + "da" + "a"                   # Keys -> Scan a key -> warning
                   + key_menu_press("Export public key", 0)
                   + "a"                               # SCRIPT TYPE -> Native segwit
-                  + "dda"                             # EXPORT AS -> Wallet file
-                  + "a" + "a"                         # channel -> dismiss
-                  + "a" * 3                           # the three addresses
-                  + "b" + "b" + "draa")
+                  # DERIVED. "dda" meant Wallet file until a second QR
+                  # row was added above it, and then it meant Text to
+                  # type: the file was never written and the assertion
+                  # below is what finally said so.
+                  + "d" * [lbl for lbl, _n in scr.EXPORT_OPTIONS].index(
+                      "Wallet file") + "a"            # EXPORT AS -> Wallet file
+                  + "a"                               # WHICH CHANNEL
+                  + "a"                               # written; dismiss
+                  # The dismissal draws the first address, so the walk is
+                  # two more presses and not three. Traced, 2026-10-16.
+                  + "a" * 2                           # addresses 2 and 3
+                  # A finished export leaves you one level deeper than a
+                  # plain key menu, so the walk out is three backs:
+                  # address pages, key menu, Keys, home. Then Settings
+                  # and Power off, since the result screen stopped
+                  # offering it on 2026-09-24.
+                  + "b" + "b" + "b" + "draa")
         r = run_device(datadir, script, work / "framesK5",
                        qr_key=key_a, stick=stick5)
         assert r.returncode == 0, (f"K5 failed rc={r.returncode}\n"
@@ -601,7 +623,12 @@ def main():
                   + rest9                        # the rest of the key
                   + "a"                          # DONE, the bar has focus
                   + "la"                         # corrections: LEFT to EXIT
-                  + "b" + "b" + "draa")
+                  # A finished export leaves you one level deeper than a
+                  # plain key menu, so the walk out is three backs:
+                  # address pages, key menu, Keys, home. Then Settings
+                  # and Power off, since the result screen stopped
+                  # offering it on 2026-09-24.
+                  + "b" + "b" + "b" + "draa")
         r = run_device(datadir, script, work / "framesK9", qr_key=key_a)
         assert r.returncode == 0, f"K9 failed:\n{r.stderr[-1500:]}"
         fr9 = work / "framesK9"
@@ -718,17 +745,20 @@ def main():
                   + "dra" + "da" + "a" + "b"
                   # back to the key, through its whole menu, and out
                   + "ra" + "a" + "b" + "b"
-                  # now sign, with the key that has been sitting there
-                  + "a" + "a" + "ra")
+                  # now sign, with the key that has been sitting there:
+                  # two review pages, destination and change, then home
+                  # and out through Settings
+                  + "a" + "aa" + "ra" + "draa")
         r = run_device(datadir, script, work / "framesK10",
                        qr_key=key_a, qr_psbt=frames10)
         assert r.returncode == 0, f"K10 failed:\n{r.stderr[-1500:]}"
-        last10 = _shots(work / "framesK10")[-1].read_bytes()
-        assert any(last10 == _render(scr.result, ok=True,
-                                     detail=f"shown as {n} QR frames",
-                                     actions_sel=1, label="SIGNED",
-                                     note="ready to send")
-                   for n in range(1, 90)), \
+        # SHOWN, not last: detail is None when the PSBT leaves as QR
+        # frames, and the walk to Power off draws after the result.
+        assert any(_has(work / "framesK10",
+                        _render(scr.result, ok=True, detail=None,
+                                actions_sel=sel, label="SIGNED",
+                                note="ready to send"))
+                   for sel in (0, 1)), \
             "K10: the key did not sign after being walked away from"
         left10 = [w for w in rpc.call("listwallets") if w in signer.SLOTS]
         assert not left10, f"K10: a key survived power off: {left10}"
@@ -836,7 +866,10 @@ def main():
         script13 = ("ra" + keys_press(0, "Scan a key") + "a"
                     + key_menu_press("Export public key")
                     + "a"                        # SCRIPT TYPE -> native segwit
-                    + "dda"                      # EXPORT AS -> Wallet file
+                    # DERIVED, for the same reason K5's is: a second QR
+                    # row moved this one down.
+                    + "d" * [lbl for lbl, _n in scr.EXPORT_OPTIONS].index(
+                        "Wallet file") + "a"     # EXPORT AS -> Wallet file
                     + "da"                       # CHANNEL -> the second row
                     + "a"                        # dismiss
                     + "a" * 3                    # the three addresses

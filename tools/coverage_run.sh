@@ -71,7 +71,14 @@ arch -arm64 python3 -m coverage report --rcfile="$HOOK/.coveragerc" -m \
 # should be taken on trust.
 MEASURED=$(grep -E "^TOTAL" "$HOOK/report.txt" | grep -oE "[0-9]+%" \
            | tr -d '%')
-STATED=$(grep -oE '\*\*[0-9]+% of `coresigner/`\*\*' "$ROOT/README.md" \
+# The dot stands in for the backtick the README writes around the path.
+# A backtick inside single quotes reads as a command substitution that
+# cannot expand (SC2016), the gate for that aborts run_tests.sh under
+# set -e, and one quoted character therefore stopped every suite from
+# running and reported 11% coverage. The word that names the linter
+# cannot start a comment line either: that is a DIRECTIVE, and
+# run_tests.sh already carries the same warning above its own gate.
+STATED=$(grep -oE '\*\*[0-9]+% of .coresigner/.\*\*' "$ROOT/README.md" \
          | grep -oE '[0-9]+')
 if [ -z "$STATED" ]; then
   echo "FAIL the README no longer states a coverage percentage"
