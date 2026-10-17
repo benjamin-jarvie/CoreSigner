@@ -80,8 +80,12 @@ window on the front, so nothing runs beside it: one binary, and the
 Debug Console inside it for anything the menus do not reach. Core Signer
 runs the other two instead, `bitcoind` wallet-only and offline and
 `bitcoin-cli` to drive it, because this device has no keyboard to type
-into a console and no desktop to draw a window on. The GUI is most of
-the archive by size and we discard every byte of it.
+into a console and no desktop to draw a window on.
+
+The GUI is 87.3MB of that archive's 178.6MB, counting `bin/bitcoin-qt`
+at 41,662,664 bytes and `libexec/bitcoin-gui` at 45,661,744, and we
+discard every byte of both. Those figures are the tarball's own, read
+out of the pinned file on 2026-10-16.
 
 Core's own documentation says why that ordering is right.
 [`doc/JSON-RPC-interface.md`](https://github.com/bitcoin/bitcoin/blob/master/doc/JSON-RPC-interface.md),
@@ -232,14 +236,28 @@ generation turns out to be wrong, and vendors differ enormously in how
 carefully they review a change, a quorum holds as long as the others are
 sound. Today none of those others can be Bitcoin Core.
 
-**What Core Signer does not do yet.** Core Signer is single signature in v1: it does
-not sign for a quorum, and it does not export a cosigner key. To put a
-Core Signer key in a quorum today you type the paper backup into Sparrow,
-which means the private key goes into a hot wallet once. Core can derive
-the cosigner branch without the key leaving, so exporting it is a real
-and small piece of work rather than a limitation of the idea. It is not
-done, and until it is, the paragraph above is an argument for the key
-format rather than a feature you can use.
+**And it is a feature you can use.** This paragraph said the opposite
+until 2026-10-16, four weeks after it stopped being true: "single
+signature in v1", "it does not sign for a quorum", "it does not export a
+cosigner key", and then the advice to type your paper backup into Sparrow,
+"which means the private key goes into a hot wallet once". Every clause
+was wrong and the last one was dangerous. What is actually there:
+
+- **The cosigner key leaves without the private key.** Core derives the
+  BIP48 branch, and the device exports it as a QR or as a file. Those
+  are two payloads on purpose: the QR carries a whole descriptor, which
+  is what a coordinator's scanner accepts, and the file carries the bare
+  `[fingerprint/path]xpub`, which is what its file importer accepts.
+  `tests/sparrow/test_cosigner.py` proves Sparrow takes it and signs
+  beside us.
+- **It signs one share of a quorum.** The review screen states the
+  threshold, the path and the cosigners before you sign, and a partial
+  signature comes back as a SHARE rather than a failure, which
+  [`tests/test_multisig_review.py`](tests/test_multisig_review.py)
+  asserts against a real 2-of-3.
+
+What the device still does not hold is the quorum itself, which is the
+paragraph above and not a gap this one can close.
 
 **One difference between the two forms is real: a seed phrase can hide a
 second secret.** BIP39 allows a passphrase, mixed into the key and
@@ -458,7 +476,7 @@ shipped program is [`coresigner/`](coresigner/), and it is eight files.
 Core's two binaries do the cryptography and are not ours.
 [`hw/vendor/`](hw/vendor/) holds 1,868 lines that are not ours either,
 pinned by hash and compared with upstream.
-[`tests/`](tests/) holds 8,297 lines that never ship: they run on a
+[`tests/`](tests/) holds 8,327 lines that never ship: they run on a
 laptop, and they are what you read to check the claims on this page
 rather than what you read to check the device.
 
@@ -543,7 +561,7 @@ payload, which is bounded by a length cap and a charset check before any
 container code runs.
 
 **Total functional code: 3,119 lines** (7,036 with blanks/comments).
-**Test code: 8,297 lines**, none of which ships.
+**Test code: 8,327 lines**, none of which ships.
 **Vendored, not ours: 1,868 lines** in [`hw/vendor/`](hw/vendor/): the
 BC-UR animated-QR codec, which is Blockchain Commons' by way of
 SeedSigner and is unmodified, and SeedSigner's ST7789 display driver,
@@ -597,7 +615,10 @@ Said before critics find it:
 
 - **No seed phrase.** You cannot bring 12 or 24 words from another
   wallet, and the backup is 111 characters written by hand.
-- **No multisig** in v1. Single signature only.
+- **It holds no quorum.** It signs one share of somebody else's and
+  exports the cosigner key for it, and the arrangement itself lives in
+  your coordinator. Lose that and the shares are useless, which is the
+  one backup this device cannot make for you.
 - **Python on the signing path.** Nothing about the language protects
   memory. A Python string cannot be reliably wiped, so while a key is
   loaded there is a copy of it in Core Signer's memory that nothing can
@@ -614,8 +635,9 @@ Said before critics find it:
   is a separate component beside the processor rather than inside it, so
   it can be desoldered, and then the answer stops depending on software
   at all.
-- **150 inputs**, and the device refuses more. That is this board's
-  memory, measured, not a policy.
+- **150 inputs**, and **120 for a quorum**, and the device refuses more
+  of either. Multisig is the heavier shape, so its ceiling is lower.
+  Both are this board's memory, measured, not a policy.
 
 ## How it is tested
 
@@ -623,18 +645,31 @@ Said before critics find it:
 need a real `bitcoind`. The rules that came out of being wrong are in
 [TESTING.md](TESTING.md).
 
-- **86% of `coresigner/`** executes under test, measured across both
-  architectures, with every uncovered line sorted into one of three piles
-  and exactly one statement unreachable
+- **81% of `coresigner/`** executes under test, measured across both
+  architectures by `tools/coverage_run.sh` on 2026-10-16: 417 of 2,608
+  statements never ran. Every uncovered line is sorted into one of three
+  piles with exactly one statement unreachable
   ([A5](docs/wayfinder/beta-audit/tickets/A5-never-run.md)).
+
+  **That is a floor, and it is lower than it should be.** This page said
+  86% until 2026-10-16, which is what A5 measured over 2,028 statements
+  when the whole suite was green. Today `tests/e2e_session.py` and
+  `tests/e2e_keys.py` fail before their device sessions run, and those
+  sessions are what cover most of `main.py`, so the figure above is
+  missing them. Both failures are open and neither is in this list of
+  things the suite proves.
 - **21 scripted device sessions** drive the real keypad and assert what
   the panel actually painted.
 - **7 adversarial attack scenarios**, including a hostile stick, a FIFO,
   a lying coordinator and a full medium.
-- **132 checks against Sparrow's own library**, out of its sha256
+- **217 checks against Sparrow's own library**, out of its sha256
   verified release, so the QR codes are read by the software that will
   really read them and not by our own decoder
-  ([`tests/sparrow/`](tests/sparrow/)).
+  ([`tests/sparrow/`](tests/sparrow/)). The suite counts them and
+  `run_tests.sh` fails if this number is not the one it counted. It said
+  132 until 2026-10-16, which is the fourth time a hardcoded total on
+  this page has gone stale, and the third fix for it has been to stop
+  writing the number down by hand.
 - **Two real mainnet spends**, ECDSA
   ([`19d1180b…`](https://mempool.space/tx/19d1180b816e00c1d272a25bda3caf1dc466b70c24ba128aee25e1a32b61cf41))
   and a Taproot keyspend

@@ -122,6 +122,21 @@ if [ -x "tests/sparrow/.build/jdk-25.0.4.1+1/Contents/Home/bin/java" ]; then
     fi
   done
   echo "     tests/sparrow total: $SPARROW checks against Sparrow's own library"
+  # And the README states that total. Audit A8 found three hardcoded
+  # copies of it wrong at once; the README's copy went stale a fourth
+  # time by 2026-10-16, at 132 for a set that runs 217. A number nobody
+  # checks is a number that drifts, so this is the check.
+  RM=$(grep -oE '\*\*[0-9]+ checks against Sparrow' README.md \
+       | grep -oE '[0-9]+')
+  if [ -z "$RM" ]; then
+    echo "FAIL the README no longer states the Sparrow check count"
+    FAILED=1
+  elif [ "$RM" != "$SPARROW" ]; then
+    echo "FAIL the README says $RM Sparrow checks; this run counted $SPARROW"
+    FAILED=1
+  else
+    echo "PASS the README's Sparrow count is the one just counted"
+  fi
 else
   echo "(not run: tests/sparrow, the only checks that read a QR with"
   echo "          anything but our own decoder. Run tests/sparrow/setup.sh"

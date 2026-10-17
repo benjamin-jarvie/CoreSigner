@@ -617,6 +617,52 @@ else:
         else:
             ok(f"the tester pack's {label} ceiling matches {const} ({want})")
 
+# --- the README states the same two ceilings, and a capability ---------
+# 2026-10-16. The pack's numbers were pinned and the README's were not,
+# so the README named 150 and never named 120 at all, and multisig has
+# been in the pilot since 2026-09-23.
+main_py = (ROOT / "coresigner" / "main.py").read_text()
+for const, phrase in (("MAX_SIGNABLE_INPUTS", r"\*\*(\d+) inputs\*\*"),
+                      ("MAX_SIGNABLE_MULTISIG_INPUTS",
+                       r"\*\*(\d+) for a quorum\*\*")):
+    m = re.search(rf"^{const} = (\d+)$", main_py, re.M)
+    r = re.search(phrase, README)
+    if not m:
+        bad(f"{const} is gone from main.py; the README still quotes it")
+    elif not r:
+        bad(f"the README no longer states the ceiling {const} owns")
+    elif r.group(1) != m.group(1):
+        bad(f"the README says {r.group(1)} where {const} is {m.group(1)}")
+    else:
+        ok(f"the README's ceiling matches {const} ({m.group(1)})")
+
+# A capability claim, the other way round. These sentences were true once
+# and the code moved under them: the README told a reader to type a paper
+# backup into a hot wallet, four weeks after the device could export the
+# cosigner key without the private key leaving. A phrase that denies a
+# shipped capability fails here.
+sig_py = (ROOT / "coresigner" / "signer.py").read_text()
+if "def cosigner_qr(" in sig_py and "def write_cosigner(" in sig_py:
+    DENIALS = ("single signature in v1", "Single signature only",
+               "does not sign for a quorum",
+               "does not export a cosigner key", "No multisig")
+    # A line that QUOTES the old wording is allowed to carry it: the
+    # correction on the page names what it used to say, which is how a
+    # reader knows the page was wrong rather than merely different. The
+    # test looks for a denial being MADE, so a line with a double quote
+    # on it is skipped and an unquoted one still fails.
+    said = [d for d in DENIALS
+            if any(d in line and '"' not in line
+                   for line in README.splitlines())]
+    if said:
+        bad("signer.py exports a cosigner key, and the README still says: "
+            + "; ".join(said))
+    else:
+        ok("the README does not deny the multisig support that ships")
+else:
+    bad("signer.py no longer exports a cosigner key; the README's "
+        "multisig section is now a claim about nothing")
+
 if fails:
     print("\n" + "\n".join(fails))
     sys.exit(1)

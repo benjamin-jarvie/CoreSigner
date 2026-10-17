@@ -32,7 +32,7 @@ the signer.
 | **zero2w-m0-fixes** | what the M0 gate needed before it could run |
 
 **Available on request.** The archive is
-`corky-closed-wayfinder-maps-2026-09-07.tar.gz`, held outside this
+`coresigner-closed-wayfinder-maps-2026-09-07.tar.gz`, held outside this
 repository, and every file is also in this repository's git history
 before commit `08b27b9`.
 
