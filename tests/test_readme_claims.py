@@ -133,6 +133,31 @@ vend = sum(len(f.read_text().splitlines())
            for f in (ROOT / "hw" / "vendor").rglob("*.py"))
 pin(r"Vendored, not ours: ([\d,]+) lines", "vendored", vend)
 
+# The same four figures again, in the audit paragraph at the top of "What
+# you are trusting". 2026-10-16: that paragraph is new, and the sentence
+# beside it had said 2,407 lines since before the multisig work. It was
+# 712 lines stale, and nothing failed, because the only pinned totals
+# were the ones further down the page. A number a reader uses to decide
+# how much code to read is the last one that should be allowed to drift.
+pin(r"What an auditor reads: ([\d,]+) lines, in one directory",
+    "auditor's total", total)
+pin(r"and Core Signer's ([\d,]+) lines do not", "lines-not-read", total)
+pin(r"holds ([\d,]+) lines that are not ours either", "vendored, again",
+    vend)
+pin(r"holds ([\d,]+) lines that never ship", "test code, again", tl)
+
+# Every shipped file must be NAMED on the page, not just counted in it.
+# hal.py and splash.py were in LAYER2's total and in no list a reader
+# could see, so the page described six files as four and an auditor
+# reading only the README would have missed 124 lines that ship.
+shipped_files = sorted((ROOT / "coresigner").glob("*.py"))
+unnamed = [f.name for f in shipped_files if f.name not in README]
+if unnamed:
+    bad(f"{len(unnamed)} shipped file(s) the README never names: "
+        + ", ".join(unnamed))
+else:
+    ok(f"the README names all {len(shipped_files)} files in coresigner/")
+
 # ...and the split between what runs and what does not. The README said
 # "every one of these lines runs on the device" while 383 of them were a
 # driver nothing imports (two-axis review, 2026-09-08). A count nobody
@@ -445,7 +470,15 @@ for doc in DOCS + ["PLAN.md"]:
         # A line that names SeedSigner is citing THEIR source, not ours.
         # Core Signer vendors their drivers and steals their ideas, and a
         # reader has to be able to tell which tree a path lives in.
-        external = "SeedSigner" in line or "seedsigner" in line
+        #
+        # 2026-10-16: the same rule for Bitcoin Core's own tree. The
+        # README now cites `doc/JSON-RPC-interface.md` on bitcoin/bitcoin
+        # for the rule that Core's other programs have to be trusted, and
+        # that path is real in Core and absent here. The exemption needs
+        # the line to carry the repository name, so a bare path still
+        # fails and a cited one does not.
+        external = ("SeedSigner" in line or "seedsigner" in line
+                    or "bitcoin/bitcoin" in line)
         for m in FILE.finditer(line):
             named = m.group(1)
             if external:

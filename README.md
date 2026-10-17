@@ -63,6 +63,37 @@ yourself. That is Core's reviewed code and nothing else, and no interface
 of ours sits between you and it. It is the smaller thing to check, and it
 will still be the smaller thing to check after Core Signer is finished.
 
+**There is a nearer alternative than that laptop: this same board, with a
+keyboard and a monitor.** The aarch64 archive we already pin ships
+`bitcoin-qt` beside `bitcoind`, built for the same CPU, and
+[`image/provision.sh`](image/provision.sh) unpacks the two binaries we run
+and throws the GUI away. The primary build's carrier has full-size HDMI
+and USB-A onboard ([ORDER.md](ORDER.md)). So Core's own reviewed
+interface runs on this hardware, from a desktop card instead of ours,
+with nothing of ours between you and the key. **If you can secure a
+keyboard and a monitor, use that instead of Core Signer.** This document
+will never tell you otherwise. (Westgate again,
+[issue #10](https://github.com/benjamin-jarvie/corky/issues/10).)
+
+Core's own documentation says why that ordering is right.
+[`doc/JSON-RPC-interface.md`](https://github.com/bitcoin/bitcoin/blob/master/doc/JSON-RPC-interface.md),
+under Security: "it is important to only use Bitcoin Core for
+security-sensitive operations on a computer whose other programs you
+trust", and any client with valid RPC credentials "should be treated as
+having significant control over both the Bitcoin Core node and the
+filesystem resources accessible by the `bitcoind` process". Core Signer
+is one of those other programs, and it holds those credentials every
+session. The GUI needs no such program: `bitcoin-qt` leaves the RPC
+server off by default, and its Debug Console sits inside the binary the
+eleven signatures already cover.
+
+**So the case for this device is narrow, and it is physical.** A keyboard
+and a monitor are hard to secure against somebody who reaches your desk
+while you are away, and both are easy to tamper with. A sealed box with a
+small screen and four buttons is easier to keep and easier to carry.
+Where you can trust the peripherals, the reference GUI is the better
+answer. Where you cannot, this device is one of the remaining options.
+
 Core Signer is Core **plus** a body of new code that draws screens, reads
 buttons and moves bytes. That code is young. It has one author and an
 audit trail rather than years of adversarial review from strangers. We
@@ -412,6 +443,15 @@ command line, so it is never in a process listing. And on the way out to
 paper, as characters on the panel. Between those, the key lives in
 Bitcoin Core and in a ramdisk, and power-off ends both.
 
+**What an auditor reads: 3,119 lines, in one directory.** The whole
+shipped program is [`coresigner/`](coresigner/), and it is eight files.
+Core's two binaries do the cryptography and are not ours.
+[`hw/vendor/`](hw/vendor/) holds 1,868 lines that are not ours either,
+pinned by hash and compared with upstream.
+[`tests/`](tests/) holds 8,297 lines that never ship: they run on a
+laptop, and they are what you read to check the claims on this page
+rather than what you read to check the device.
+
 The code is in three layers, and the first one is the claim that matters:
 
 **Layer 1 transforms secret material. 0 lines of Core Signer.** Nothing in
@@ -430,7 +470,7 @@ Both are the official builds, pinned by sha256 in
 from the server that served the binary, and re-verified from a fresh
 download on 2026-09-08. That is the layer that does the cryptography,
 and the reason this project exists is that it has thousands of readers
-and Core Signer's 2,407 lines do not.
+and Core Signer's 3,119 lines do not.
 
 Layer 1 being empty is enforced, not asserted.
 [`tests/test_integrity.py`](tests/test_integrity.py) fails if any shipped
@@ -440,7 +480,14 @@ vocabulary comes back.
 
 **Layer 2 sees secrets, computes nothing with them. 2851 lines.**
 [`main.py`](coresigner/main.py), [`signer.py`](coresigner/signer.py),
-[`screens.py`](coresigner/screens.py), [`qrsource.py`](coresigner/qrsource.py).
+[`screens.py`](coresigner/screens.py) and
+[`qrsource.py`](coresigner/qrsource.py) carry the key.
+[`hal.py`](coresigner/hal.py) and [`splash.py`](coresigner/splash.py)
+are counted in this layer and neither one handles the string: `hal.py`
+pushes the finished frame to the panel, so the key reaches it as pixels,
+and `splash.py` draws the boot screen and never sees a key. They are
+counted with the files that do see secrets because overstating that
+number is the safe direction.
 
 **Yes, this is Core Signer's own code, and yes it holds your actual private
 key.** Not a hash of it, not a handle to it: the xprv itself, in plain
@@ -472,9 +519,8 @@ lives as long as the session and not one second longer.
 suite that keeps that true.
 
 **Layer 3 never touches secrets at all. 268 lines.** Also Core Signer's own
-code: [`filechannel.py`](coresigner/filechannel.py) and
-[`qrchannel.py`](coresigner/qrchannel.py), plus the panel driver and the
-buttons.
+code, and two files: [`filechannel.py`](coresigner/filechannel.py) and
+[`qrchannel.py`](coresigner/qrchannel.py).
 
 These handle only transactions and public keys. A PSBT is not a secret,
 and neither is a descriptor with an xpub in it. The risk here is a
@@ -487,7 +533,7 @@ payload, which is bounded by a length cap and a charset check before any
 container code runs.
 
 **Total functional code: 3,119 lines** (7,036 with blanks/comments).
-**Test code: 8,283 lines**, none of which ships.
+**Test code: 8,297 lines**, none of which ships.
 **Vendored, not ours: 1,868 lines** in [`hw/vendor/`](hw/vendor/): the
 BC-UR animated-QR codec, which is Blockchain Commons' by way of
 SeedSigner and is unmodified, and SeedSigner's ST7789 display driver,
