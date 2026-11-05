@@ -1313,7 +1313,13 @@ class Session:
         check later can come back to Backup key and do it then.
         """
         label = f"KEY  {(xfp or '').upper()}"
-        xprv = signer.master_xprv(self.rpc, wallet=name)
+        try:
+            xprv = signer.master_xprv(self.rpc, wallet=name)
+        except RuntimeError as exc:
+            # No single private key to write down, so no page shows a key
+            # at all (ISSUES E-9).
+            self._hold(f"Cannot back up: {exc}")
+            return False
         outcome = self._show_backup(xprv, label)
         if outcome is None:
             return False

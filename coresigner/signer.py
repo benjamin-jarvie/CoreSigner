@@ -61,6 +61,13 @@ _SECRET_RE = re.compile(
     % ("|".join(XPRV_PREFIXES), _WIF_RE))
 
 
+#: An extended private key inside a descriptor. The lookbehind is there
+#: because a tpub's own base58 can spell `tprv`, and a match must not
+#: start inside another key.
+_XPRV_RE = re.compile(r"(?<![1-9A-HJ-NP-Za-km-z])(?:%s)[1-9A-HJ-NP-Za-km-z]+"
+                      % "|".join(XPRV_PREFIXES))
+
+
 def redact(text: str) -> str:
     """Strip key material out of text bound for a screen, a log or the
     journal. This is string handling, not key handling: nothing here
@@ -1212,29 +1219,21 @@ def master_xprv(rpc: "Rpc", wallet: str = WALLET) -> str:
     Core wrote. This is the paper backup (ticket 07): Core's own string,
     nothing of ours between Core and the page.
 
-    THE ONE-MASTER CHECK IS WHAT MAKES THE PARSE SAFE. "After the last
-    `(`" finds the innermost key, which is right for `wpkh(k/...)` and for
-    `sh(wpkh(k/...))`, and would find the wrong key in a descriptor whose
-    innermost `(` belonged to a script leaf rather than to the key, such
-    as `tr(k,pk(other))`. Core 31.1 refuses every such shape with a
-    private key, tested 2026-09-08, so Core Signer cannot hold one. If a future
-    Core accepted one, the eight descriptors would disagree about the
-    master and this raises. It shows the right key or no key; there is no
-    shape that makes it show a wrong one silently.
+    A PRIVATE KEY OR NO KEY, NEVER A PUBLIC ONE. This used to take the key
+    after the last `(`, because a test on 2026-09-08 found Core refusing
+    every descriptor where that is the wrong key. Core 31.1 and 32.1 both accept
+    a scanned `tr(k,pk(other))` with the warning "Not all private keys
+    provided" (measured 2026-11-05), and the last `(` there belongs to the
+    script leaf, so the backup showed the other party's tpub (ISSUES E-9).
+    So every key expression is read, only an extended private key counts,
+    and exactly one distinct one across all the descriptors is the backup.
+    None, or more than one, raises, and Backup key refuses.
     """
     descs = rpc.call("listdescriptors", True, wallet=wallet)["descriptors"]
-    masters = set()
-    for d in descs:
-        text = d["desc"]
-        # innermost key expression: text after the LAST '(' up to '/' or ')'
-        key = text[text.rindex("(") + 1:]
-        for stop in "/)":
-            if stop in key:
-                key = key[: key.index(stop)]
-        masters.add(key)
+    masters = {key for d in descs for key in _XPRV_RE.findall(d["desc"])}
     if len(masters) != 1:
         raise RuntimeError(
-            f"expected one master key across descriptors, got {len(masters)}")
+            f"expected one master xprv, found {len(masters)}")
     return masters.pop()
 
 

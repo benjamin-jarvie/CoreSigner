@@ -27,6 +27,36 @@ rule is that fixed items leave; the measurements are in the commit.
 
 ## Open
 
+### E-9 Backup key showed a public key for a scanned taproot descriptor
+
+Found 2026-11-05 while measuring the Core 32.1 claims, and the same on
+Core 31.1. `signer.master_xprv` took the key after the last `(` in each
+private descriptor. Core accepts a scanned `tr(k,pk(other))` with the
+warning "Not all private keys provided", and the last `(` there belongs to
+the script leaf. So Backup key showed the other party's tpub as the paper
+backup. The tree form `tr(k,{pk(other),pk(other)})` did the same. The
+one-master check did not catch it, because one descriptor holds one key.
+
+The same parse gave two more wrong backups, measured the same day:
+
+| scanned descriptor | the backup showed |
+|---|---|
+| `tr(k,pk(other))`, and the tree form | the other party's tpub |
+| `tr(k,pk(k2))`, two private keys | `k2`, with no refusal |
+| `wpkh([fp/84h/1h/0h]k/0/*)` | the text `[fp` |
+| `tr(other,pk(WIF))` | the WIF |
+| `tr(other,pk(k))` | `k`, correct |
+
+**The rule now** (bb-orchestrator ruling, 2026-11-05): the paper backup
+shows a private key or no key, never a public key. `master_xprv` reads
+every key expression and keeps the extended private keys. Exactly one
+distinct key across all the descriptors is the backup. None, or more
+than one, gives a refusal screen, and no page shows a key.
+`tests/test_backup_key.py` runs each shape above through a real Core.
+
+Loading is unchanged: `open_session_descriptors` does not call
+`master_xprv`, so Core Signer accepts the same descriptors as before.
+
 ### E-8 BlueWallet imports one of our four policies, and hangs on another
 
 Ben scanned the public key export into BlueWallet and it hung (2026-09-24).
