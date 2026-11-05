@@ -23,6 +23,24 @@ def sats(btc):
     return int((Decimal(str(btc)) * SATS).to_integral_value())
 
 
+def review_matches(info, marks):
+    """(ok, note) for Core Signer's review against Sparrow's numbers.
+
+    The M1 gate (PLAN.md:377) is "fee and outputs on screen match
+    Sparrow", so this compares the review with the fee and outputs
+    Sparrow computed for the same transaction.
+    """
+    coresigner = (sats(info["fee_btc"]),
+                  sorted((o["address"], sats(o["amount_btc"]))
+                         for o in info["outputs"]))
+    sparrow = (int(marks["FEE"][0]),
+               sorted((a, int(v)) for a, v in
+                      (m.split("\t") for m in marks["VOUT"])))
+    if coresigner == sparrow:
+        return True, f"fee {coresigner[0]} sat, {len(coresigner[1])} outputs"
+    return False, f"coresigner {coresigner} | sparrow {sparrow}"
+
+
 def main():
     java = Java()
     R = Results()
@@ -99,19 +117,8 @@ def main():
                                  tags=("OUT", "FEE", "VOUT"))
                     psbt = marks["OUT"][0]
                     info = harness.signer.describe_psbt(net.rpc, psbt)
-
-                    # The M1 gate (PLAN.md:377) is "fee and outputs on screen
-                    # match Sparrow". Compare Core Signer's review numbers with the
-                    # ones Sparrow computed for the same transaction.
-                    coresigner = (sats(info["fee_btc"]),
-                             sorted((o["address"], sats(o["amount_btc"]))
-                                    for o in info["outputs"]))
-                    sparrow = (int(marks["FEE"][0]),
-                               sorted((a, int(v)) for a, v in
-                                      (m.split("\t") for m in marks["VOUT"])))
-                    R.record(f"{full} :: review matches Sparrow", coresigner == sparrow,
-                             f"fee {coresigner[0]} sat, {len(coresigner[1])} outputs"
-                             if coresigner == sparrow else f"coresigner {coresigner} | sparrow {sparrow}")
+                    R.record(f"{full} :: review matches Sparrow",
+                             *review_matches(info, marks))
 
                     signed = harness.signer.sign_psbt(net.rpc, psbt)
                     if not signed["complete"]:
@@ -127,21 +134,26 @@ def main():
                 except Exception as exc:
                     R.record(full, False, str(exc).replace("\n", " ")[:170])
 
-            # the PSBTv2 boundary
+            # Sparrow's own PSBTv2, before its export downgrade. Core 31
+            # refused every v2. Core 32 decodes it, and its decode of a v2
+            # has no `tx`, so this is the check that the review reads that
+            # second shape with the numbers Sparrow shows.
+            full = f"{script_type} PSBTv2 :: review matches Sparrow"
             try:
-                v2 = java("SparrowGen", "psbt", "REGTEST", script_type, xpub, fp,
-                          path, 2.0, f"p={d1},400000,false", S("CHANGE", 0),
-                          raw=True)[0]
-                try:
-                    harness.signer.describe_psbt(net.rpc, v2)
-                    R.record(f"{script_type} PSBTv2 rejected by Core", False,
-                             "Core ACCEPTED a v2 PSBT, which contradicts psbt.h")
-                except RuntimeError as exc:
-                    R.record(f"{script_type} PSBTv2 (silent-payments path) "
-                             f"rejected by Core", True,
-                             "Core: " + str(exc).split("\n")[-1][:70])
+                java.chain_height = net.height()
+                marks = java("SparrowGen", "psbt", "REGTEST", script_type,
+                             xpub, fp, path, 2.0, f"p={d1},400000,false",
+                             S("CHANGE", 0), raw=True,
+                             tags=("OUT", "FEE", "VOUT"))
+                v2 = marks["OUT"][0]
+                version = net.rpc.call("decodepsbt", v2).get("psbt_version")
+                if version != 2:
+                    R.record(full, False, f"Sparrow gave psbt_version {version}")
+                else:
+                    info = harness.signer.describe_psbt(net.rpc, v2)
+                    R.record(full, *review_matches(info, marks))
             except Exception as exc:
-                R.record(f"{script_type} PSBTv2 boundary probe", False, str(exc)[:120])
+                R.record(full, False, str(exc).replace("\n", " ")[:170])
             print()
 
     return R.summary()
