@@ -56,6 +56,9 @@ than one, gives a refusal screen, and no page shows a key.
 
 Loading is unchanged: `open_session_descriptors` does not call
 `master_xprv`, so Core Signer accepts the same descriptors as before.
+The cosigner export (`cosigner_key`) and told-path signing
+(`sign_at_told_paths`) read the same key. For the shapes above they now
+use `k`, or refuse, where they used the wrong key before.
 
 ### E-8 BlueWallet imports one of our four policies, and hangs on another
 

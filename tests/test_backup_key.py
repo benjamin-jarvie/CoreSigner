@@ -13,7 +13,6 @@ rule 1). The backup is then read through the real Backup key screen.
 
 Run: python3 tests/test_backup_key.py (needs bitcoind)
 """
-import re
 import shutil
 import socket
 import subprocess
@@ -98,10 +97,13 @@ def main():
         rpc.call("createwallet", "other")
         pub = rpc.call("listdescriptors", wallet="other")["descriptors"][0]
         other_pub = pub["desc"][pub["desc"].index("]") + 1:].split("/")[0]
+        # Sliced out of Core's own `pkh(tprv.../44h/...)`, so the answer
+        # does not come from the pattern under test (TESTING.md rule 2).
         priv = rpc.call("listdescriptors", True,
-                        wallet="other")["descriptors"][0]
-        other_prv = re.search(r"tprv[1-9A-HJ-NP-Za-km-z]+",
-                              priv["desc"]).group(0)
+                        wallet="other")["descriptors"][0]["desc"]
+        other_prv = priv[len("pkh("):].split("/")[0]
+        if not other_prv.startswith("tprv8ZgxMBicQKsP"):
+            bad(f"Core's first private descriptor is not pkh: {priv[:4]}")
 
         mine = f"{KEY}/86h/1h/0h/0/*"
         cases = [
@@ -136,6 +138,28 @@ def main():
             ok("a key Core made shows its depth-0 master")
         else:
             bad(f"a key Core made: shown {len(shown)} keys, held {held}")
+
+        # A checksum is eight characters of its own alphabet, which holds
+        # x, p, r, v and t, and a 0 that base58 does not. So "#a0tprvqz"
+        # can be a real checksum, and the key read must not find a second
+        # key in it. Core's own descriptors, with only the checksum set.
+        listed = rpc.call("listdescriptors", True,
+                          wallet=made)["descriptors"]
+
+        class Checksums:
+            def call(self, method, *a, **k):
+                return {"descriptors": [
+                    {**d, "desc": d["desc"].split("#")[0] + "#a0tprvqz"}
+                    for d in listed]}
+
+        try:
+            got = signer.master_xprv(Checksums(), wallet=made)
+            if got == shown[0]:
+                ok("a checksum that spells tprv is not read as a key")
+            else:
+                bad(f"a checksum changed the key read: {signer.redact(got)}")
+        except RuntimeError as exc:
+            bad(f"a checksum that spells tprv refused the key: {exc}")
         signer.close_session(rpc)
     finally:
         daemon.terminate()

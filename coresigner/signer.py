@@ -1230,7 +1230,10 @@ def master_xprv(rpc: "Rpc", wallet: str = WALLET) -> str:
     None, or more than one, raises, and Backup key refuses.
     """
     descs = rpc.call("listdescriptors", True, wallet=wallet)["descriptors"]
-    masters = {key for d in descs for key in _XPRV_RE.findall(d["desc"])}
+    # The checksum goes first: its alphabet can spell `tprv` after a 0,
+    # which base58 does not have, and that reads as a second key.
+    masters = {key for d in descs
+               for key in _XPRV_RE.findall(d["desc"].split("#")[0])}
     if len(masters) != 1:
         raise RuntimeError(
             f"expected one master xprv, found {len(masters)}")
