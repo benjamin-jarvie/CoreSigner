@@ -118,7 +118,7 @@ def told_path_sign(rpc, datadir):
     and cannot be satisfied by closing the session first.
     """
     import test_multisig_review as m9
-    psbt, _, _ = m9.build_quorum(rpc, extra_key=XPRV_A)
+    psbt, _, _, _ = m9.build_quorum(rpc, extra_key=XPRV_A)
     wallet = signer.open_session_xprv(rpc, XPRV_A)
     xfp = signer.master_fingerprint(rpc, wallet)
     scratch_dir = rpc.wallet_dir / signer._SIGN_SCRATCH

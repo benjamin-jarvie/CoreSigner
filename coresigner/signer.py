@@ -786,6 +786,61 @@ _OWNER_DROPS = frozenset((
 ))
 
 
+class UnreadablePsbt(RuntimeError):
+    """decodepsbt answered in a shape the review screen cannot read.
+
+    A RuntimeError, so any flow that shows Core's refusals shows this one.
+    `state_review` catches it first and refuses on screen, and nothing is
+    signed (bb-orchestrator ruling, 2026-11-04).
+    """
+
+
+#: BIP 370: an input with no PSBT_IN_SEQUENCE has nSequence 0xffffffff.
+_ABSENT_SEQUENCE = 0xffffffff
+
+
+def _review_shape(decoded: dict) -> "tuple[list[dict], list[dict]]":
+    """The outputs and the inputs' sequences, out of either PSBT version.
+
+    A v0 PSBT carries the unsigned transaction, and Core decodes it as
+    `tx`. A v2 PSBT has none (BIP 370): Core puts each output's value and
+    address on `outputs` as `amount` and `script`, and each input's
+    `sequence` on `inputs`. Core 32.0 started accepting v2 and
+    walletcreatefundedpsbt makes it by default, so a Core coordinator
+    sends this shape. Both readings take Core's values as Core wrote
+    them.
+
+    An input with no PSBT_IN_SEQUENCE has no `sequence` in Core's decode
+    (measured on 32.1, 2026-11-04). It becomes 0xffffffff here, as BIP 370
+    reads it, so `_spend_lock` sees the input and never skips it.
+
+    Anything else raises UnreadablePsbt, naming what was missing, because
+    a review built on a guess about the shape is the one screen this
+    device must not show.
+    """
+    try:
+        inputs = decoded["inputs"]
+        if "tx" in decoded:
+            vout = [(v["scriptPubKey"], v["value"])
+                    for v in decoded["tx"]["vout"]]
+            vin = decoded["tx"].get("vin", [])
+        elif decoded.get("psbt_version") == 2:
+            vout = [(o["script"], o["amount"]) for o in decoded["outputs"]]
+            vin = [{"sequence": i.get("sequence", _ABSENT_SEQUENCE)}
+                   for i in inputs]
+        else:
+            raise UnreadablePsbt(
+                f"no 'tx', and PSBT version "
+                f"{decoded.get('psbt_version')!r} is not 2")
+        outputs = [{"address": script.get("address", "(non-standard)"),
+                    "amount_btc": amount} for script, amount in vout]
+    except KeyError as exc:
+        raise UnreadablePsbt(f"Core's decode has no {exc}") from None
+    except (TypeError, AttributeError):
+        raise UnreadablePsbt("Core's decode is not in a known shape") from None
+    return outputs, vin
+
+
 def describe_psbt(rpc: "Rpc", psbt_b64: str) -> dict:
     """Everything the review screen shows. All numbers are Core's.
 
@@ -812,15 +867,14 @@ def describe_psbt(rpc: "Rpc", psbt_b64: str) -> dict:
     `input_total_btc` of None used to mean and what makes the device
     refuse the transaction. One condition now instead of two that could
     disagree.
+
+    Raises UnreadablePsbt when Core's decode is in neither PSBT version's
+    shape; see `_review_shape`.
     """
     decoded = rpc.call("decodepsbt", psbt_b64, stdin=True,
                        drop=_REVIEW_DROPS)
     analysis = rpc.call("analyzepsbt", psbt_b64, stdin=True)
-    outputs = [
-        {"address": vout["scriptPubKey"].get("address", "(non-standard)"),
-         "amount_btc": vout["value"]}
-        for vout in decoded["tx"]["vout"]
-    ]
+    outputs, vin = _review_shape(decoded)
     locks = _timelocks(decoded["inputs"])
     fee = decoded.get("fee")
     input_total = None
@@ -837,7 +891,7 @@ def describe_psbt(rpc: "Rpc", psbt_b64: str) -> dict:
         "quorum": _quorum(decoded["inputs"]),
         "cosigners": _cosigners(decoded["inputs"]),
         "timelocks": locks,
-        "spend_lock": _spend_lock(decoded["tx"].get("vin", []), locks),
+        "spend_lock": _spend_lock(vin, locks),
     }
 
 

@@ -2370,7 +2370,19 @@ class Session:
         wallet = self._key_for(psbt)
         if wallet is None:
             return TO_HOME
-        info = signer.describe_psbt(self.rpc, psbt)
+        try:
+            info = signer.describe_psbt(self.rpc, psbt)
+        except signer.UnreadablePsbt as exc:
+            # Fail closed. Core 32 began decoding PSBT v2 in a second
+            # shape, and the first one to arrive raised a KeyError here,
+            # which ended the process with the scan screen frozen on the
+            # panel. A shape the review cannot read is a transaction the
+            # device must not sign, so say what is missing and go home.
+            self.display.show(screens.result(
+                self.w, self.h, ok=False,
+                detail=f"Cannot review: {exc}"[:MESSAGE_CHARS]))
+            self.buttons.read()
+            return TO_HOME
         # A quorum costs more per input, so it gets its own ceiling
         # rather than one conservative number for everything, which would
         # refuse ordinary batches this board is measured signing (Ben,

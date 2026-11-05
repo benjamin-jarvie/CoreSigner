@@ -8,6 +8,7 @@ signature is delivered rather than refused.
 
 Run: python3 tests/test_multisig_review.py (needs bitcoind)
 """
+import base64
 import random
 import subprocess
 import sys
@@ -57,7 +58,9 @@ _built = [0]
 
 
 def build_quorum(rpc, threshold=2, total=3, extra_key=None):
-    """A real 2-of-3, funded, with a spend to review. Returns (psbt, keys).
+    """A real 2-of-3, funded, with a spend to review.
+
+    Returns (psbt, keys, miner wallet, quorum wallet).
 
     `extra_key` puts an xprv WE hold into the quorum, so the spend is one
     this device can actually sign a share of.
@@ -98,7 +101,7 @@ def build_quorum(rpc, threshold=2, total=3, extra_key=None):
     rpc.call("generatetoaddress", 1, mine, wallet=mw)
     psbt = rpc.call("walletcreatefundedpsbt", [], [{mine: 1.5}], 0,
                     {"fee_rate": 5}, True, wallet=qw)["psbt"]
-    return psbt, keys, mw
+    return psbt, keys, mw, qw
 
 
 def build_decay(rpc):
@@ -155,10 +158,77 @@ def build_decay(rpc):
     return spends, signer.master_fingerprint(rpc, "dours")
 
 
+def both_versions(rpc, wallet, ins, outs):
+    """ONE transaction, as a PSBT v0 and as a PSBT v2. Returns (v0, v2).
+
+    Built from one raw transaction and filled by the wallet that owns
+    the inputs, rather than funded twice, so the two cannot differ in
+    coin choice, change address or output order. The version is the only
+    thing left to differ, and the version is what is under test.
+    """
+    raw = rpc.call("createrawtransaction", ins, outs, stdin=True)
+    pair = []
+    for version in (0, 2):
+        bare = rpc.call("converttopsbt", raw, False, True, version,
+                        stdin=True)
+        filled = rpc.call("walletprocesspsbt", bare, False, "ALL", True,
+                          False, wallet=wallet, stdin=True)["psbt"]
+        got = rpc.call("decodepsbt", filled, stdin=True)["psbt_version"]
+        if got != version:
+            raise AssertionError(f"asked Core for PSBT v{version}, got v{got}")
+        pair.append(filled)
+    return tuple(pair)
+
+
+def _compact(data, at):
+    """A Bitcoin compact size at `at`. Returns (value, next offset)."""
+    first = data[at]
+    if first < 0xfd:
+        return first, at + 1
+    width = {0xfd: 2, 0xfe: 4, 0xff: 8}[first]
+    return int.from_bytes(data[at + 1:at + 1 + width], "little"), at + 1 + width
+
+
+def _as_compact(n):
+    if n < 0xfd:
+        return bytes([n])
+    return b"\xfd" + n.to_bytes(2, "little")
+
+
+def without_sequence(psbt_b64, index):
+    """The same PSBT v2 with PSBT_IN_SEQUENCE removed from one input.
+
+    BIP 370 makes the field optional and reads an absent one as
+    0xffffffff. Core always writes it, measured on 32.1 (2026-11-04), so
+    no Core call makes this case. Another coordinator may, so it is cut
+    out of a real PSBT here, byte for byte, and nothing else moves.
+    """
+    data = base64.b64decode(psbt_b64)
+    maps, at = [], 5
+    while at < len(data):
+        pairs = []
+        while True:
+            klen, at = _compact(data, at)
+            if klen == 0:
+                break
+            key = data[at:at + klen]
+            vlen, at = _compact(data, at + klen)
+            pairs.append((key, data[at:at + vlen]))
+            at += vlen
+        maps.append(pairs)
+    # maps[0] is the global map, so input `index` is maps[1 + index].
+    maps[1 + index] = [(k, v) for k, v in maps[1 + index] if k != b"\x10"]
+    body = b"".join(
+        b"".join(_as_compact(len(k)) + k + _as_compact(len(v)) + v
+                 for k, v in pairs) + b"\x00"
+        for pairs in maps)
+    return base64.b64encode(data[:5] + body).decode()
+
+
 def main():
     daemon, rpc, datadir = start_node("m9-")
     try:
-        psbt, keys, mw = build_quorum(rpc)
+        psbt, keys, mw, qw = build_quorum(rpc)
 
         # 1. THE THRESHOLD. M3 decision 2: review says "2 of 3". Core
         #    already reports the script type and the threshold, so Core Signer
@@ -189,7 +259,17 @@ def main():
         #    the first input and printing "2 of 3" over a transaction
         #    that also spends a single-sig UTXO is exactly the kind of
         #    true-looking screen audit A6 removed.
-        joined = rpc.call("joinpsbts", [psbt, solo], stdin=True)
+        #
+        #    joinpsbts takes only v0 (Core 32.1: "joinpsbts only operates
+        #    on version 0 PSBTs"), and 32.x funds v2 by default, so the
+        #    two halves are funded again as v0. The arguments after
+        #    `True` are the transaction version and the PSBT version.
+        joined = rpc.call("joinpsbts", [
+            rpc.call("walletcreatefundedpsbt", [], [{mine: 1.5}], 0,
+                     {"fee_rate": 5}, True, 2, 0, wallet=qw)["psbt"],
+            rpc.call("walletcreatefundedpsbt", [], [{mine: 0.5}], 0,
+                     {"fee_rate": 5}, True, 2, 0,
+                     wallet="m9solo")["psbt"]], stdin=True)
         mixed = signer.describe_psbt(rpc, joined)
         if mixed.get("quorum") == "mixed":
             ok("a transaction spending both reports a mixed quorum")
@@ -274,7 +354,7 @@ def main():
                      [{"desc": f"{raw}#{c}", "active": True,
                        "internal": bool(change), "timestamp": "now",
                        "range": [0, 20]}], wallet="m9ours", stdin=True)
-        quorum_psbt, _, _ = build_quorum(rpc, extra_key=XPRV)
+        quorum_psbt, _, _, _ = build_quorum(rpc, extra_key=XPRV)
         share = signer.sign_psbt(rpc, quorum_psbt, wallet="m9ours")
         if share.get("added") is True and share["complete"] is False:
             ok("one share of a quorum reports a signature added, not done")
@@ -375,6 +455,79 @@ def main():
         else:
             bad(f"15: tier 3 added={t3['added']} complete={t3['complete']}; "
                 "the one-key tier must finish on this device alone")
+
+        # 16. PSBT V2 GIVES THE SAME REVIEW AS V0. Core 32.0 accepts v2
+        #     and walletcreatefundedpsbt makes it by default, so a Core
+        #     coordinator sends it. A v2 decode has no `tx`: the outputs
+        #     carry `amount` and `script`, the inputs carry `sequence`.
+        #     One transaction in both versions must give the same review,
+        #     field for field, for each thing the screen says: a plain
+        #     spend, a quorum, and every tier of a decaying policy.
+        mine = rpc.call("getnewaddress", wallet="dmn")
+        solo_u = rpc.call("listunspent", 1, 9999, wallet="m9solo")[0]
+        q_us = rpc.call("listunspent", 1, 9999, wallet=qw)
+        d_u = rpc.call("listunspent", 1, 9999, wallet="dq")[0]
+        pairs = [
+            ("single-sig", "m9solo",
+             [{"txid": solo_u["txid"], "vout": solo_u["vout"]}],
+             [{mine: 0.4},
+              {rpc.call("getrawchangeaddress", wallet="m9solo"): 0.5999}]),
+            ("2 of 3", qw,
+             [{"txid": u["txid"], "vout": u["vout"]} for u in q_us],
+             [{mine: 1.5},
+              {rpc.call("getrawchangeaddress", wallet=qw): 0.4999}]),
+        ]
+        for label, seq in (("normal", 0xfffffffd), ("tier 2", 10),
+                           ("tier 3", 20), ("final", 0xffffffff)):
+            pairs.append((
+                f"decay {label}", "dq",
+                [{"txid": d_u["txid"], "vout": d_u["vout"], "sequence": seq}],
+                [{mine: float(d_u["amount"]) - 0.0001}]))
+        for name, wallet, ins, outs in pairs:
+            v0, v2 = both_versions(rpc, wallet, ins, outs)
+            r0 = signer.describe_psbt(rpc, v0)
+            r2 = signer.describe_psbt(rpc, v2)
+            differ = sorted(k for k in set(r0) | set(r2)
+                            if r0.get(k) != r2.get(k))
+            if not r0["outputs"] or r0["fee_btc"] is None:
+                bad(f"16 {name}: the v0 review is empty, so equality "
+                    "proves nothing")
+            elif differ:
+                bad(f"16 {name}: v0 and v2 reviews differ in {differ}: "
+                    f"{ {k: (r0.get(k), r2.get(k)) for k in differ} }")
+            else:
+                ok(f"{name}: v0 and v2 give the same review, "
+                   f"{len(r0)} fields, lock={r2['spend_lock']}")
+
+        # 17. AN ABSENT SEQUENCE IS 0xffffffff, NOT "SKIP THIS INPUT".
+        #     BIP 370 makes PSBT_IN_SEQUENCE optional, and Core then
+        #     leaves `sequence` out of the decode. Two inputs: one at
+        #     tier 3, one with no sequence. Read as 0xffffffff the
+        #     inputs disagree and no tier is named, exactly as v0 with
+        #     that sequence says. A reader that skipped the input would
+        #     say AFTER 20 BLOCKS over a spend whose other input has no
+        #     relative lock at all.
+        rpc.call("sendtoaddress", d_u["address"], 1.0, wallet="dmn")
+        rpc.call("generatetoaddress", 1, mine, wallet="dmn")
+        d_us = rpc.call("listunspent", 1, 9999, [d_u["address"]], wallet="dq")
+        two = [{"txid": u["txid"], "vout": u["vout"], "sequence": s}
+               for u, s in zip(d_us[:2], (20, 0xffffffff))]
+        total = sum(float(u["amount"]) for u in d_us[:2])
+        v0, v2 = both_versions(rpc, "dq", two, [{mine: total - 0.0002}])
+        bare = without_sequence(v2, 1)
+        seqs = [i.get("sequence") for i in
+                rpc.call("decodepsbt", bare, stdin=True)["inputs"]]
+        r0 = signer.describe_psbt(rpc, v0)
+        rb = signer.describe_psbt(rpc, bare)
+        if len(d_us) < 2 or seqs != [20, None]:
+            bad(f"17: fixture: wanted inputs with sequences [20, absent], "
+                f"Core decodes {seqs}")
+        elif r0 != rb or rb["spend_lock"] is not None:
+            bad(f"17: absent sequence gave lock={rb['spend_lock']!r}; v0 "
+                f"with 0xffffffff gives {r0['spend_lock']!r}")
+        else:
+            ok("an input with no sequence reads as 0xffffffff: the same "
+               "review as v0, and no tier named")
     finally:
         daemon.terminate(); daemon.wait()
     print("\n" + ("=" * 60))
