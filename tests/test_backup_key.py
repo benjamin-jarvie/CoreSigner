@@ -13,6 +13,7 @@ rule 1). The backup is then read through the real Backup key screen.
 
 Run: python3 tests/test_backup_key.py (needs bitcoind)
 """
+import hashlib
 import shutil
 import socket
 import subprocess
@@ -34,6 +35,8 @@ KEY = ("tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ss"
 # Core's to accept or refuse.
 WIF = "cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy"
 
+B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
 fails = []
 
 
@@ -51,6 +54,34 @@ class Blind:
 
     def show(self, image, sensitive=False):
         pass
+
+
+def tpub_that_spells_tprv(tpub):
+    """The same public key under a chain code searched until the base58
+    spells `tprv` inside it. A key read that starts a match there takes
+    part of a public key as a private key, which the lookbehind in
+    _XPRV_RE stops. The base58 here is written from BIP32's layout, not
+    from the code under test (TESTING.md rule 2)."""
+    n = 0
+    for c in tpub:
+        n = n * 58 + B58.index(c)
+    raw = n.to_bytes(82, "big")
+    if hashlib.sha256(hashlib.sha256(raw[:78]).digest()).digest()[:4] \
+            != raw[78:]:
+        raise AssertionError("Core's tpub did not decode")
+    # version..child number, then the chain code, then the public key.
+    head, key = raw[:13], raw[45:78]
+    for i in range(10_000_000):
+        payload = head + hashlib.sha256(i.to_bytes(8, "big")).digest() + key
+        payload += hashlib.sha256(
+            hashlib.sha256(payload).digest()).digest()[:4]
+        n, text = int.from_bytes(payload, "big"), ""
+        while n:
+            n, r = divmod(n, 58)
+            text = B58[r] + text
+        if "tprv" in text:
+            return text
+    raise AssertionError("no chain code spelled tprv in 10^7 tries")
 
 
 def backup_screen(rpc, wallet):
@@ -105,6 +136,13 @@ def main():
         if not other_prv.startswith("tprv8ZgxMBicQKsP"):
             bad(f"Core's first private descriptor is not pkh: {priv[:4]}")
 
+        # The same public key, so Core's own check is what accepts it.
+        spells = tpub_that_spells_tprv(other_pub)
+        for desc in (f"tr({spells}/0/*,pk({WIF}))",
+                     f"tr({KEY}/86h/1h/0h/0/*,pk({spells}/0/*))"):
+            rpc.call("getdescriptorinfo", desc)
+        ok(f"Core accepts a tpub that spells tprv at {spells.index('tprv')}")
+
         mine = f"{KEY}/86h/1h/0h/0/*"
         cases = [
             # (what, descriptor, the key the backup shows or None)
@@ -116,12 +154,17 @@ def main():
              f"wpkh([73c5da0a/84h/1h/0h]{other_prv}/0/*)", other_prv),
             ("two private keys", f"tr({mine},pk({other_prv}/0/*))", None),
             ("a WIF and no xprv", f"tr({other_pub}/0/*,pk({WIF}))", None),
+            ("a WIF, and a tpub that spells tprv",
+             f"tr({spells}/0/*,pk({WIF}))", None),
+            ("k, and a tpub that spells tprv",
+             f"tr({mine},pk({spells}/0/*))", KEY),
         ]
         for what, desc, want in cases:
             wallet = signer.open_session_descriptors(rpc, [desc])
             shown, held = backup_screen(rpc, wallet)
-            if other_pub in shown:
-                bad(f"{what}: the backup shows the other party's public key")
+            if any(k in other_pub or k in spells for k in shown):
+                bad(f"{what}: the backup shows the other party's public key"
+                    " or a part of it")
             elif want is not None and shown == [want]:
                 ok(f"{what}: the backup shows the private key")
             elif want is None and not shown and held:
