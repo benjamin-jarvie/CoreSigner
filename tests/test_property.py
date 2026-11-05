@@ -704,7 +704,7 @@ def prop_an_unreadable_decode_is_refused_not_signed():
             chain = "regtest"
 
             def call(self, method, *params, wallet=None, stdin=False,
-                     drop=(), answer=answer):
+                     drop=(), answer=answer, called=called):
                 called.append(method)
                 if method == "decodepsbt":
                     return answer

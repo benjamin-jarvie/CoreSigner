@@ -511,7 +511,7 @@ def main():
         rpc.call("generatetoaddress", 1, mine, wallet="dmn")
         d_us = rpc.call("listunspent", 1, 9999, [d_u["address"]], wallet="dq")
         two = [{"txid": u["txid"], "vout": u["vout"], "sequence": s}
-               for u, s in zip(d_us[:2], (20, 0xffffffff))]
+               for u, s in zip(d_us[:2], (20, 0xffffffff), strict=True)]
         total = sum(float(u["amount"]) for u in d_us[:2])
         v0, v2 = both_versions(rpc, "dq", two, [{mine: total - 0.0002}])
         bare = without_sequence(v2, 1)
