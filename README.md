@@ -476,7 +476,7 @@ shipped program is [`coresigner/`](coresigner/), and it is eight files.
 Core's two binaries do the cryptography and are not ours.
 [`hw/vendor/`](hw/vendor/) holds 1,868 lines that are not ours either,
 pinned by hash and compared with upstream.
-[`tests/`](tests/) holds 8,588 lines that never ship: they run on a
+[`tests/`](tests/) holds 8,606 lines that never ship: they run on a
 laptop, and they are what you read to check the claims on this page
 rather than what you read to check the device.
 
@@ -561,7 +561,7 @@ payload, which is bounded by a length cap and a charset check before any
 container code runs.
 
 **Total functional code: 3,159 lines** (7,137 with blanks/comments).
-**Test code: 8,588 lines**, none of which ships.
+**Test code: 8,606 lines**, none of which ships.
 **Vendored, not ours: 1,868 lines** in [`hw/vendor/`](hw/vendor/): the
 BC-UR animated-QR codec, which is Blockchain Commons' by way of
 SeedSigner and is unmodified, and SeedSigner's ST7789 display driver,
