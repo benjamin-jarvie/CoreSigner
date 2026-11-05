@@ -435,7 +435,7 @@ def about(w, h):
     d.text((w // 2, int(h * 0.34)), "CORESIGNER", font=_font(int(h * 0.11)),
            fill=CREAM, anchor="mm")
     _fit_block(d, ["Core's keys, nothing kept",
-                   "wallet brain: Bitcoin Core 31.1"],
+                   "wallet brain: Bitcoin Core 32.1"],
                [(w // 2, int(h * 0.52)), (w // 2, int(h * 0.66))],
                int(h * 0.05), GREY, "mm", int(w * 0.9))
     _actions(d, w, h, ["BACK"], 0)

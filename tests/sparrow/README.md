@@ -28,7 +28,7 @@ Nothing is reimplemented, so a pass means Sparrow's real output is signable.
 gitignored. It needs its own JDK because Sparrow 2.5.4 ships class file
 version 69, which JDK 24 and older refuse to read.
 
-## Matrix, 22 checks, all green against Core v31.1
+## Matrix, 22 checks, all green against Core v32.1
 
 Per script type (BIP84 `P2WPKH`, BIP86 `P2TR`):
 
@@ -41,7 +41,7 @@ Per script type (BIP84 `P2WPKH`, BIP86 `P2TR`):
 | mixed receive and change inputs | both descriptors in one transaction |
 | 2 payments plus change | more than one output |
 | send max, no change output | the one-output shape |
-| PSBTv2 is rejected by Core | pins the boundary, see below |
+| PSBTv2 review matches Sparrow | Core decodes v2 from 32.0, in a second shape, see below |
 
 ## The QR air gap, 20 checks, all green
 
@@ -88,18 +88,26 @@ optical read is M1 hardware work and this suite cannot stand in for it.
 ## The PSBTv2 boundary
 
 Sparrow 2.4.0 made PSBTv2 its default internal representation. Bitcoin Core
-31.1 sets `PSBT_HIGHEST_VERSION = 0` and throws
-`Unsupported version number` (`src/psbt.h:1485`) on anything higher. Core Signer is
-Bitcoin Core, so Core Signer cannot read a v2 PSBT.
+31.1 set `PSBT_HIGHEST_VERSION = 0` and threw `Unsupported version number` on
+anything higher, so Core Signer on 31.1 refused every v2. Bitcoin Core 32.0
+raised it to 2 (`src/psbt.h:97` at v32.1), and a version above 2 still throws
+(`src/psbt.h:1485`). From 32.0, `walletcreatefundedpsbt` also makes a v2 by
+default.
 
-This does not break normal use, because `PSBT.getForExport()` downgrades to v0
-on the way out. Its own comment states the exception:
+Core's decode of a v2 has no `tx`. Each output carries `amount` and `script`,
+and each input carries `previous_txid`, `previous_vout` and, when the PSBT has
+it, `sequence`. `signer._review_shape` reads both shapes, and every number on
+the review screen is still Core's.
+
+`PSBT.getForExport()` still downgrades to v0 on the way out. Its own comment
+states the exception:
 
     //Export as PSBTv0 unless silent payments are present
 
-**So a Sparrow transaction involving silent payments stays v2 and Core Signer will
-refuse it.** The test pins that failure so the day Core gains v2 support, or
-the day Sparrow changes the rule, this suite says so.
+The v2 check takes Sparrow's raw PSBTv2, the shape before that downgrade, and
+asserts that the review shows the fee and outputs Sparrow computed. No check
+here builds a silent-payment transaction, so this suite does not show what
+Core Signer does with one.
 
 ## What Sparrow sends
 
