@@ -350,3 +350,17 @@ name in one second where the end-to-end suites took five minutes, and
 of them goes on the device. The README section "What runs on the signer" is
 the whole list of what does, and `tests/test_integrity.py` enforces it as an
 import allowlist, so the two cannot drift apart without a red suite.
+
+## Rule 13: a safety argument that says Core refuses a shape needs a test that gives that shape to Core
+
+`signer.master_xprv` read the key after the last `(`. Its docstring said
+that was safe because "Core 31.1 refuses every such shape with a private
+key, tested 2026-09-08". No suite gave Core such a shape, so nothing could
+show that the claim was wrong. Core 31.1 and 32.1 accept a scanned
+`tr(k,pk(other))`, and Backup key showed the other party's tpub as the
+paper backup (ISSUES E-9, 2026-11-05).
+
+When code is safe only because Core refuses an input, a suite gives that
+input to the real Core and asserts the refusal. A new Core version then
+breaks the test, not the backup. `tests/test_backup_key.py` does this for
+each descriptor shape the key read must handle.

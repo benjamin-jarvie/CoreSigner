@@ -14,6 +14,19 @@ needs a copy here.
 Last reviewed 2026-09-06, audit A9. Every claim below was checked against
 the source on that date.
 
+E-9, the Backup key that showed a wrong key for some scanned descriptors,
+was opened and closed on 2026-11-05. `signer.master_xprv` took the key
+after the last `(`, and its docstring said Core 31.1 refuses every shape
+where that is the wrong key. Core 31.1 and 32.1 accept them. So
+`tr(k,pk(other))` and its tree form showed the other party's tpub,
+`tr(k,pk(k2))` showed `k2`, `wpkh([fp/84h/1h/0h]k/0/*)` showed `[fp`,
+and `tr(other,pk(WIF))` showed the WIF. The rule now: the paper backup
+shows a private key or no key. Exactly one distinct extended private key
+across the descriptors is the backup, and none or more than one is a
+refusal. The cosigner export and told-path signing read the same key,
+so they changed with it. `tests/test_backup_key.py` gives each shape
+to Core.
+
 E-6, the export QR mask threshold that failed about one run in forty,
 was opened and closed on 2026-09-11. The flake was the FIXTURE: the
 suite generated a fresh key every run and asserted 6 of 8 masks decode,
@@ -26,39 +39,6 @@ opened and closed on 2026-09-09. It is not here because this file's own
 rule is that fixed items leave; the measurements are in the commit.
 
 ## Open
-
-### E-9 Backup key showed a public key for a scanned taproot descriptor
-
-Found 2026-11-05 while measuring the Core 32.1 claims, and the same on
-Core 31.1. `signer.master_xprv` took the key after the last `(` in each
-private descriptor. Core accepts a scanned `tr(k,pk(other))` with the
-warning "Not all private keys provided", and the last `(` there belongs to
-the script leaf. So Backup key showed the other party's tpub as the paper
-backup. The tree form `tr(k,{pk(other),pk(other)})` did the same. The
-one-master check did not catch it, because one descriptor holds one key.
-
-The same parse gave two more wrong backups, measured the same day:
-
-| scanned descriptor | the backup showed |
-|---|---|
-| `tr(k,pk(other))`, and the tree form | the other party's tpub |
-| `tr(k,pk(k2))`, two private keys | `k2`, with no refusal |
-| `wpkh([fp/84h/1h/0h]k/0/*)` | the text `[fp` |
-| `tr(other,pk(WIF))` | the WIF |
-| `tr(other,pk(k))` | `k`, correct |
-
-**The rule now** (bb-orchestrator ruling, 2026-11-05): the paper backup
-shows a private key or no key, never a public key. `master_xprv` reads
-every key expression and keeps the extended private keys. Exactly one
-distinct key across all the descriptors is the backup. None, or more
-than one, gives a refusal screen, and no page shows a key.
-`tests/test_backup_key.py` runs each shape above through a real Core.
-
-Loading is unchanged: `open_session_descriptors` does not call
-`master_xprv`, so Core Signer accepts the same descriptors as before.
-The cosigner export (`cosigner_key`) and told-path signing
-(`sign_at_told_paths`) read the same key. For the shapes above they now
-use `k`, or refuse, where they used the wrong key before.
 
 ### E-8 BlueWallet imports one of our four policies, and hangs on another
 
