@@ -97,7 +97,7 @@ filesystem resources accessible by the `bitcoind` process". Core Signer
 is one of those other programs, and it holds those credentials every
 session. The GUI needs no such program: `bitcoin-qt` leaves the RPC
 server off by default, and its Debug Console sits inside the binary the
-eleven signatures already cover.
+eight signatures already cover.
 
 **So the case for this device is narrow, and it is physical.** A keyboard
 is a cable with a chip in it that somebody who reaches your desk can
@@ -115,7 +115,7 @@ verify Core's binaries against the release signatures. Every input to a
 card is pinned by hash since 2026-09-23, so two people can check they
 built from the same bytes. That is not the same as a reproducible build,
 and the table further down says which pins are worth what: ours is a
-commit, Core's is eleven signatures, and the operating system under both
+commit, Core's is eight signatures, and the operating system under both
 is an image nobody can rebuild.
 
 **And there is 3MB of closed firmware underneath all of it.** On a
