@@ -2347,7 +2347,11 @@ class Session:
         if not self.keys:
             self._hold("Load a key first")
             return None
-        owners = signer.owners(self.rpc, psbt)
+        try:
+            owners = signer.owners(self.rpc, psbt)
+        except signer.UnreadablePsbt as exc:
+            self._hold(f"Cannot review: {exc}")
+            return None
         matches = [k for k in self.keys if k.xfp in owners]
         if owners and not matches:
             self.display.show(screens.result(
@@ -2445,10 +2449,7 @@ class Session:
             # which ended the process with the scan screen frozen on the
             # panel. A shape the review cannot read is a transaction the
             # device must not sign, so say what is missing and go home.
-            self.display.show(screens.result(
-                self.w, self.h, ok=False,
-                detail=f"Cannot review: {exc}"[:MESSAGE_CHARS]))
-            self.buttons.read()
+            self._hold(f"Cannot review: {exc}")
             return None
         if info["fee_btc"] is None:
             # Missing input data: refuse loudly instead of crashing (a fee

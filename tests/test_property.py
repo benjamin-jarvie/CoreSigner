@@ -637,8 +637,10 @@ def prop_an_unreadable_decode_is_refused_not_signed():
     missing, and nothing may be signed (bb-orchestrator ruling,
     2026-11-04).
 
-    Each case removes one field the review needs from an answer Core
-    really gives. The first case is that answer whole, which proves the
+    Each case removes one field the review needs from an answer in the
+    shape Core gives. These are literals, so the shape is the author's;
+    tests/test_multisig_review.py checks both shapes against a real Core
+    decode. The first case is that answer whole, which proves the
     fake reaches the review screen, so a refusal below means the field
     and not the fake.
     """
@@ -721,26 +723,29 @@ def prop_an_unreadable_decode_is_refused_not_signed():
         sess = coresigner_main.Session(disp, hal.DevButtons("c"),
                                        rpc=Answers(), animate=False,
                                        on_device=False)
-        sess._key_for = lambda _psbt: "coresigner-73c5da0a"
+        # The real _key_for runs, because it decodes the PSBT before the
+        # review does, and a crash there is the same crash (TESTING.md
+        # rule 3). Only the key list is given, as one loaded key.
+        sess._refresh_keys = lambda sess=sess: setattr(
+            sess, "keys", [signer.Key("coresigner", "73c5da0a")])
         try:
             sess.state_review("cHNidP8B", None)
         except hal.ScriptExhausted:
             pass
+        whys = _unreadable_why(answer)
         refusals = [f for f in disp.shown
                     if any(f.tobytes() == screens.result(
                         320, 240, ok=False,
                         detail=f"Cannot review: {why}"[:coresigner_main.MESSAGE_CHARS]
-                    ).tobytes() for why in _unreadable_why(answer))]
+                    ).tobytes() for why in whys)]
         if "walletprocesspsbt" in called:
             raise AssertionError(f"{name}: the device signed it")
         if want_refusal and not refusals:
             raise AssertionError(
                 f"{name}: no refusal screen naming the problem was drawn")
-        if want_refusal and not any(names in why
-                                    for why in _unreadable_why(answer)):
+        if want_refusal and not any(names in why for why in whys):
             raise AssertionError(
-                f"{name}: the refusal {_unreadable_why(answer)!r} does not "
-                f"name {names}")
+                f"{name}: the refusal {whys!r} does not name {names}")
         if not want_refusal and refusals:
             raise AssertionError(
                 f"{name}: an answer Core really gives was refused")

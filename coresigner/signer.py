@@ -790,8 +790,8 @@ class UnreadablePsbt(RuntimeError):
     """decodepsbt answered in a shape the review screen cannot read.
 
     A RuntimeError, so any flow that shows Core's refusals shows this one.
-    `state_review` catches it first and refuses on screen, and nothing is
-    signed (bb-orchestrator ruling, 2026-11-04).
+    `Session._key_for` and `Session._reviewable` catch it first and refuse
+    on screen, and nothing is signed (bb-orchestrator ruling, 2026-11-04).
     """
 
 
@@ -1022,12 +1022,19 @@ def owners(rpc: "Rpc", psbt_b64: str) -> set[str]:
     decoded = rpc.call("decodepsbt", psbt_b64, stdin=True,
                        drop=_OWNER_DROPS)
     found = set()
-    for txin in decoded["inputs"]:
-        for field in ("bip32_derivs", "taproot_bip32_derivs"):
-            for deriv in txin.get(field, []):
-                xfp = deriv.get("master_fingerprint")
-                if xfp:
-                    found.add(xfp.lower())
+    try:
+        for txin in decoded["inputs"]:
+            for field in ("bip32_derivs", "taproot_bip32_derivs"):
+                for deriv in txin.get(field, []):
+                    xfp = deriv.get("master_fingerprint")
+                    if xfp:
+                        found.add(xfp.lower())
+    except KeyError as exc:
+        # This decode comes before the review's own, so it fails closed
+        # the same way and with the same words.
+        raise UnreadablePsbt(f"Core's decode has no {exc}") from None
+    except (TypeError, AttributeError):
+        raise UnreadablePsbt("Core's decode is not in a known shape") from None
     return found
 
 
