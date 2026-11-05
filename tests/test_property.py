@@ -138,6 +138,29 @@ def prop_no_key_reaches_the_panel():
         return coresigner_main.Session(Blind(), hal.DevButtons("a"), NoRpc(),
                                   animate=False)
 
+    class Decodes(NoRpc):
+        """Core's decode quoting the secret back, where the review's
+        refusal repeats the field it cannot read."""
+
+        def __init__(self, secret):
+            self.secret = secret
+
+        def call(self, method, *a, **k):
+            if method == "decodepsbt":
+                return {"psbt_version": self.secret, "inputs": [{}],
+                        "outputs": [{}]}
+            return ""
+
+    def review(secret):
+        sess = coresigner_main.Session(Blind(), hal.DevButtons("a"),
+                                       Decodes(secret), animate=False)
+        sess._refresh_keys = lambda: setattr(
+            sess, "keys", [sg.Key("coresigner", "73c5da0a")])
+        try:
+            sess.state_review("cHNidP8B", None)
+        except hal.ScriptExhausted:
+            pass
+
     seen = []
     real = scr.result
     scr.result = lambda w, h, **kw: seen.append(kw.get("detail", "")) or "r"
@@ -153,6 +176,9 @@ def prop_no_key_reaches_the_panel():
                 "_show_core_error":
                     lambda s: session()._show_core_error(
                         RuntimeError(f"importdescriptors: '{s}' refused")),
+                # The review's refusal once drew its own screen, around
+                # _hold and so around the redactor.
+                "the review refusal": review,
             }
             for label, run in funnels.items():
                 seen.clear()
