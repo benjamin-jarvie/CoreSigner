@@ -1236,7 +1236,7 @@ def master_xprv(rpc: "Rpc", wallet: str = WALLET) -> str:
                for key in _XPRV_RE.findall(d["desc"].split("#")[0])}
     if len(masters) != 1:
         raise RuntimeError(
-            f"expected one master xprv, found {len(masters)}")
+            f"expected one master private key, found {len(masters)}")
     return masters.pop()
 
 

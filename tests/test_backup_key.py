@@ -14,6 +14,7 @@ rule 1). The backup is then read through the real Backup key screen.
 Run: python3 tests/test_backup_key.py (needs bitcoind)
 """
 import hashlib
+import re
 import shutil
 import socket
 import subprocess
@@ -35,6 +36,9 @@ KEY = ("tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ss"
 # Core's to accept or refuse.
 WIF = "cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy"
 
+# The screen word is the one CONTEXT.md defines: "master private key".
+REFUSAL = re.compile(
+    r"Cannot back up: expected one master private key, found \d+")
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 fails = []
@@ -167,7 +171,8 @@ def main():
                     " or a part of it")
             elif want is not None and shown == [want]:
                 ok(f"{what}: the backup shows the private key")
-            elif want is None and not shown and held:
+            elif want is None and not shown and REFUSAL.fullmatch(
+                    "".join(held)):
                 ok(f"{what}: refused, no key shown ({held[0]})")
             else:
                 bad(f"{what}: shown {[signer.redact(k)[:24] for k in shown]}"
