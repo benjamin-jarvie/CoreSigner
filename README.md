@@ -471,12 +471,12 @@ command line, so it is never in a process listing. And on the way out to
 paper, as characters on the panel. Between those, the key lives in
 Bitcoin Core and in a ramdisk, and power-off ends both.
 
-**What an auditor reads: 3,158 lines, in one directory.** The whole
+**What an auditor reads: 3,159 lines, in one directory.** The whole
 shipped program is [`coresigner/`](coresigner/), and it is eight files.
 Core's two binaries do the cryptography and are not ours.
 [`hw/vendor/`](hw/vendor/) holds 1,868 lines that are not ours either,
 pinned by hash and compared with upstream.
-[`tests/`](tests/) holds 8,713 lines that never ship: they run on a
+[`tests/`](tests/) holds 8,728 lines that never ship: they run on a
 laptop, and they are what you read to check the claims on this page
 rather than what you read to check the device.
 
@@ -498,7 +498,7 @@ Both are the official builds, pinned by sha256 in
 from the server that served the binary, and verified from a fresh
 download on 2026-11-04. That is the layer that does the cryptography,
 and the reason this project exists is that it has thousands of readers
-and Core Signer's 3,158 lines do not.
+and Core Signer's 3,159 lines do not.
 
 Layer 1 being empty is enforced, not asserted.
 [`tests/test_integrity.py`](tests/test_integrity.py) fails if any shipped
@@ -506,7 +506,7 @@ module imports `hashlib`, `hmac`, `secrets`, `random` or any curve
 library, if `os.urandom` appears anywhere, or if key-derivation
 vocabulary comes back.
 
-**Layer 2 sees secrets, computes nothing with them. 2890 lines.**
+**Layer 2 sees secrets, computes nothing with them. 2891 lines.**
 [`main.py`](coresigner/main.py), [`signer.py`](coresigner/signer.py),
 [`screens.py`](coresigner/screens.py) and
 [`qrsource.py`](coresigner/qrsource.py) carry the key.
@@ -560,8 +560,8 @@ Core an opaque string, and the one exception is documented at the top of
 payload, which is bounded by a length cap and a charset check before any
 container code runs.
 
-**Total functional code: 3,158 lines** (7,142 with blanks/comments).
-**Test code: 8,713 lines**, none of which ships.
+**Total functional code: 3,159 lines** (7,145 with blanks/comments).
+**Test code: 8,728 lines**, none of which ships.
 **Vendored, not ours: 1,868 lines** in [`hw/vendor/`](hw/vendor/): the
 BC-UR animated-QR codec, which is Blockchain Commons' by way of
 SeedSigner and is unmodified, and SeedSigner's ST7789 display driver,
