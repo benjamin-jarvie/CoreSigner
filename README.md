@@ -489,14 +489,14 @@ ours:
 
 | | |
 |---|---|
-| `bitcoind` 31.1, aarch64, stripped | 16.4MB |
-| `bitcoin-cli` | 2.6MB |
+| `bitcoind` 32.1, aarch64, stripped | 16.3MB |
+| `bitcoin-cli` | 7.5MB |
 
 Both are the official builds, pinned by sha256 in
-[`image/PINS`](image/PINS), checked against 11 GPG signatures on
+[`image/PINS`](image/PINS), checked against 8 GPG signatures on
 `SHA256SUMS` taken out of band from the guix.sigs repository rather than
-from the server that served the binary, and re-verified from a fresh
-download on 2026-09-08. That is the layer that does the cryptography,
+from the server that served the binary, and verified from a fresh
+download on 2026-11-04. That is the layer that does the cryptography,
 and the reason this project exists is that it has thousands of readers
 and Core Signer's 3,121 lines do not.
 
@@ -687,7 +687,7 @@ as an import allowlist, so adding one means changing this section,
 | | source |
 |---|---|
 | Raspberry Pi OS Lite 64-bit, trixie | sha256 pinned in `image/PINS` |
-| Bitcoin Core 31.1 | official binary, sha256 pinned, 11 GPG signatures checked out of band |
+| Bitcoin Core 32.1 | official binary, sha256 pinned, 8 GPG signatures checked out of band |
 | Pillow, picamera2, spidev, RPi.GPIO, libzbar0, pip | six `.deb` files, each pinned by **url, sha256 and size** in `image/PINS`. Not apt: see below |
 | qrcode, pyzbar, and their two dependencies | pip, pinned by **sha256** in `image/requirements.txt` and installed with `--require-hashes` |
 | ST7789 driver, BC-UR codec, icon font | vendored in `hw/vendor/`, MIT/BSD/CC-BY |
@@ -715,7 +715,7 @@ say so would be telling you something untrue by omission.
 
 | | pinned by | attested by | reproducible? |
 |---|---|---|---|
-| **Bitcoin Core 31.1** | sha256 | **11 GPG signatures**, keys served by a different host to the binary | **yes**, Core's builds are Guix and bit-for-bit |
+| **Bitcoin Core 32.1** | sha256 | **8 GPG signatures** and 15 guix.sigs attestations, keys served by a different host to the binary | **yes**, Core's builds are Guix and bit-for-bit |
 | Core Signer's own code | git commit | nothing yet | yes, it is text |
 | the four pip wheels | sha256, `--require-hashes` | nothing | no |
 | the six `.deb` files | sha256 + size | nothing | no |

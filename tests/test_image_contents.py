@@ -144,7 +144,7 @@ def main():
                 "verify-install.sh cannot check the binary on the board")
 
     # 6. The signer's own payload must be verified before it is unpacked
-    #    as root. Bitcoin Core is checked against a sha256 and eleven GPG
+    #    as root. Bitcoin Core is checked against a sha256 and eight GPG
     #    signatures; coresigner.tar.gz was taken on trust, unpacked as root and
     #    then run as root at every boot (audit of image/, 2026-09-08).
     prov = (ROOT / "image" / "provision.sh").read_text()

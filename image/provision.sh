@@ -109,7 +109,7 @@ dpkg -i "$DEB_CACHE"/*.deb || {
 # for something nothing uses.
 echo "== 3/5 coresigner -> /opt/coresigner"
 # VERIFY THE PAYLOAD FIRST. Bitcoin Core is checked against a sha256 and
-# eleven GPG signatures a few lines above; the signer's own code was the
+# eight GPG signatures a few lines above; the signer's own code was the
 # one thing this script took on trust, unpacked as root, and then ran as
 # root at every boot. prepare-sd.sh records the hash beside the tarball
 # (audit of image/, 2026-09-08).
