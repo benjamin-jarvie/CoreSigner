@@ -4,7 +4,8 @@ Run ON THE PI (works on a dev machine too, with reduced measurements):
     python3 m0/m0_gate.py [--inputs 250]
 
 What it does, with the exact production memory flags from m0/bitcoin.conf:
-  1. Starts bitcoind on regtest in a temp datadir.
+  1. Starts bitcoind on regtest in a temp datadir on the SD card
+     (/var/tmp, or --datadir-root), never in tmpfs.
   2. Opens a Core Signer session (importdescriptors), timed.
   3. A miner wallet funds Core Signer with N separate UTXOs.
   4. Core Signer builds and signs a PSBT spending ALL N inputs (the stress case:
@@ -16,7 +17,9 @@ MemAvailable never drops below 100MB.
 """
 
 import argparse
+import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -36,6 +39,17 @@ XPRV = ("tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ssvp"
 FLAGS = ["-regtest", "-dbcache=4", "-maxmempool=5", "-rpcthreads=1",
          "-networkactive=0", "-listen=0", "-server=1",
          "-fallbackfee=0.0001", "-debuglogfile=0"]
+# Module-level so a test can stand a directory in for the board's.
+PROC = Path("/proc")
+# Not /tmp, which is tmpfs on Trixie: a datadir there puts a preallocated
+# 16MB blk00000.dat in the very RAM the gate measures, and the device's
+# own datadir already holds one (2026-11-06 diagnosis: 18MB of Shmem).
+# provision.sh works on disk in /var/tmp for the same reason.
+DATADIR_ROOT = Path("/var/tmp")
+# Where gates before this one made their datadirs.
+TMP = Path("/tmp")
+DATADIR_PREFIX = "coresigner-m0-"
+RAM_FILESYSTEMS = {"tmpfs", "ramfs"}
 
 
 def vm_hwm_mb(pid):
@@ -53,14 +67,72 @@ def vm_hwm_mb(pid):
     return None
 
 
-def mem_available_mb():
-    meminfo = Path("/proc/meminfo")
+def meminfo_mb(field):
+    meminfo = PROC / "meminfo"
     if not meminfo.exists():
         return None
     for line in meminfo.read_text().splitlines():
-        if line.startswith("MemAvailable"):
+        if line.startswith(field + ":"):
             return int(line.split()[1]) // 1024
     return None
+
+
+def mem_available_mb():
+    return meminfo_mb("MemAvailable")
+
+
+def filesystem_of(path):
+    """(mount point, fstype) holding path, or None where /proc/mounts is
+    absent (dev machine: no verdict either way)."""
+    mounts = PROC / "mounts"
+    if not mounts.exists():
+        return None
+    target = str(Path(path).resolve())
+    best = None
+    for line in mounts.read_text().splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        # The kernel writes a space in a mount point as \040. It lists
+        # mounts in the order made, and a later mount at or above a path
+        # hides what was below it, so the last line that holds it wins.
+        point = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)),
+                       parts[1])
+        if (target == point or point == "/"
+                or target.startswith(point.rstrip("/") + "/")):
+            best = (point, parts[2])
+    return best
+
+
+def preflight(root):
+    """Exit 2 before bitcoind starts if the run would measure the gate's
+    own setup instead of the device."""
+    fs = filesystem_of(root)
+    if fs and fs[1] in RAM_FILESYSTEMS:
+        print(f"M0 INVALID: datadir root {root} is on {fs[1]} at {fs[0]}."
+              " A datadir in RAM costs the headroom under test.")
+        print("Fix: pass --datadir-root with a path on the SD card.")
+        sys.exit(2)
+    # SIGKILL runs no handler, so a killed gate can still leave one. In
+    # tmpfs it holds RAM; on the card it holds nothing, but it says a run
+    # died and its numbers are missing.
+    left = sorted(p for place in {TMP, Path(root)}
+                  for p in place.glob(DATADIR_PREFIX + "*"))
+    if left:
+        print("M0 INVALID: a gate datadir is already present:")
+        for p in left:
+            print(f"  {p}")
+        print("A killed gate leaves one, and in tmpfs it holds the RAM under"
+              " test. Stop any running gate and bitcoind, then remove it.")
+        sys.exit(2)
+    # The low-water follows the idle value: the same code on the same Core
+    # read 22.7MB apart before and after a reboot (2026-11-06). Shmem is
+    # tmpfs, where a leftover datadir would show.
+    idle = {"idle MemAvailable (MB)": mem_available_mb(),
+            "idle Shmem (MB)": meminfo_mb("Shmem")}
+    for k, v in idle.items():
+        print(f"  {k}: {'n/a (not Linux)' if v is None else v}")
+    return idle
 
 
 def swap_active_mb():
@@ -129,6 +201,13 @@ def _sample(stop, track):
             track["temp"] = t
 
 
+def _exit_on_signal(signum, _frame):
+    """SIGTERM ends Python without running `finally`, so a runner's
+    timeout left bitcoind running and its datadir in place. As an
+    exception it unwinds through the cleanup like any other."""
+    sys.exit(128 + signum)
+
+
 def _build_quorum(rpc, threshold, total, report):
     """A watch-only M-of-N holding Core Signer's cosigner key and strangers.
 
@@ -174,6 +253,8 @@ def main():
     # (TESTING.md rule 3), not a convenient one.
     args.add_argument("--quorum", metavar="M-of-N",
                       help="measure a multisig share, e.g. 2-of-3")
+    args.add_argument("--datadir-root", type=Path, default=DATADIR_ROOT,
+                      help="where the temp datadir goes; never tmpfs")
     parsed = args.parse_args()
     n, batch = parsed.inputs, parsed.funding_batch
     quorum = None
@@ -194,21 +275,26 @@ def main():
         print("                                       # comes straight back")
         print("  sudo swapoff -a                      # any disk swap left")
         sys.exit(2)
+    idle = preflight(parsed.datadir_root)
 
     stop_sampler = threading.Event()
     track = {"mem": None, "temp": None}  # floor and peak at 200ms resolution
     threading.Thread(target=_sample,
                      args=(stop_sampler, track), daemon=True).start()
 
-    datadir = tempfile.mkdtemp(prefix="coresigner-m0-")
-    t0 = time.time()
-    daemon = subprocess.Popen(["bitcoind", f"-datadir={datadir}", *FLAGS],
-                              stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL)
-    rpc = signer.Rpc(datadir, chain="regtest")
-    report = {}
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, _exit_on_signal)
+    datadir = daemon = rpc = None
+    report = dict(idle)
     low_water = None
     try:
+        datadir = tempfile.mkdtemp(prefix=DATADIR_PREFIX,
+                                   dir=parsed.datadir_root)
+        rpc = signer.Rpc(datadir, chain="regtest")
+        t0 = time.time()
+        daemon = subprocess.Popen(["bitcoind", f"-datadir={datadir}", *FLAGS],
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL)
         for _ in range(240):
             try:
                 rpc.call("getblockcount")
@@ -311,13 +397,19 @@ def main():
             print(f"\nM0 (dev run): signing works; RSS now ~{rss}MB. "
                   "Run on the Pi for the real verdict.")
     finally:
+        # A second signal must not cut the cleanup short.
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            signal.signal(sig, signal.SIG_IGN)
         stop_sampler.set()
-        try:
-            rpc.call("stop")
-            daemon.wait(timeout=60)
-        except Exception:
-            daemon.kill()
-        shutil.rmtree(datadir, ignore_errors=True)
+        if daemon is not None:
+            try:
+                rpc.call("stop")
+                daemon.wait(timeout=60)
+            except Exception:
+                daemon.kill()
+                daemon.wait()
+        if datadir is not None:
+            shutil.rmtree(datadir, ignore_errors=True)
 
 
 if __name__ == "__main__":
