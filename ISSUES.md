@@ -14,6 +14,19 @@ needs a copy here.
 Last reviewed 2026-09-06, audit A9. Every claim below was checked against
 the source on that date.
 
+E-9, the Backup key that showed a wrong key for some scanned descriptors,
+was opened and closed on 2026-11-05. `signer.master_xprv` took the key
+after the last `(`, and its docstring said Core 31.1 refuses every shape
+where that is the wrong key. Core 31.1 and 32.1 accept them. So
+`tr(k,pk(other))` and its tree form showed the other party's tpub,
+`tr(k,pk(k2))` showed `k2`, `wpkh([fp/84h/1h/0h]k/0/*)` showed `[fp`,
+and `tr(other,pk(WIF))` showed the WIF. The rule now: the paper backup
+shows a private key or no key. Exactly one distinct extended private key
+across the descriptors is the backup, and none or more than one is a
+refusal. The cosigner export and told-path signing read the same key,
+so they changed with it. `tests/test_backup_key.py` gives each shape
+to Core.
+
 E-6, the export QR mask threshold that failed about one run in forty,
 was opened and closed on 2026-09-11. The flake was the FIXTURE: the
 suite generated a fresh key every run and asserted 6 of 8 masks decode,

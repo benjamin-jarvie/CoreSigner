@@ -97,7 +97,7 @@ filesystem resources accessible by the `bitcoind` process". Core Signer
 is one of those other programs, and it holds those credentials every
 session. The GUI needs no such program: `bitcoin-qt` leaves the RPC
 server off by default, and its Debug Console sits inside the binary the
-eleven signatures already cover.
+eight signatures already cover.
 
 **So the case for this device is narrow, and it is physical.** A keyboard
 is a cable with a chip in it that somebody who reaches your desk can
@@ -115,7 +115,7 @@ verify Core's binaries against the release signatures. Every input to a
 card is pinned by hash since 2026-09-23, so two people can check they
 built from the same bytes. That is not the same as a reproducible build,
 and the table further down says which pins are worth what: ours is a
-commit, Core's is eleven signatures, and the operating system under both
+commit, Core's is eight signatures, and the operating system under both
 is an image nobody can rebuild.
 
 **And there is 3MB of closed firmware underneath all of it.** On a
@@ -471,12 +471,12 @@ command line, so it is never in a process listing. And on the way out to
 paper, as characters on the panel. Between those, the key lives in
 Bitcoin Core and in a ramdisk, and power-off ends both.
 
-**What an auditor reads: 3,121 lines, in one directory.** The whole
+**What an auditor reads: 3,159 lines, in one directory.** The whole
 shipped program is [`coresigner/`](coresigner/), and it is eight files.
 Core's two binaries do the cryptography and are not ours.
 [`hw/vendor/`](hw/vendor/) holds 1,868 lines that are not ours either,
 pinned by hash and compared with upstream.
-[`tests/`](tests/) holds 8,372 lines that never ship: they run on a
+[`tests/`](tests/) holds 8,937 lines that never ship: they run on a
 laptop, and they are what you read to check the claims on this page
 rather than what you read to check the device.
 
@@ -489,16 +489,16 @@ ours:
 
 | | |
 |---|---|
-| `bitcoind` 31.1, aarch64, stripped | 16.4MB |
-| `bitcoin-cli` | 2.6MB |
+| `bitcoind` 32.1, aarch64, stripped | 16.3MB |
+| `bitcoin-cli` | 7.5MB |
 
 Both are the official builds, pinned by sha256 in
-[`image/PINS`](image/PINS), checked against 11 GPG signatures on
+[`image/PINS`](image/PINS), checked against 8 GPG signatures on
 `SHA256SUMS` taken out of band from the guix.sigs repository rather than
-from the server that served the binary, and re-verified from a fresh
-download on 2026-09-08. That is the layer that does the cryptography,
+from the server that served the binary, and verified from a fresh
+download on 2026-11-04. That is the layer that does the cryptography,
 and the reason this project exists is that it has thousands of readers
-and Core Signer's 3,121 lines do not.
+and Core Signer's 3,159 lines do not.
 
 Layer 1 being empty is enforced, not asserted.
 [`tests/test_integrity.py`](tests/test_integrity.py) fails if any shipped
@@ -506,7 +506,7 @@ module imports `hashlib`, `hmac`, `secrets`, `random` or any curve
 library, if `os.urandom` appears anywhere, or if key-derivation
 vocabulary comes back.
 
-**Layer 2 sees secrets, computes nothing with them. 2853 lines.**
+**Layer 2 sees secrets, computes nothing with them. 2891 lines.**
 [`main.py`](coresigner/main.py), [`signer.py`](coresigner/signer.py),
 [`screens.py`](coresigner/screens.py) and
 [`qrsource.py`](coresigner/qrsource.py) carry the key.
@@ -560,8 +560,8 @@ Core an opaque string, and the one exception is documented at the top of
 payload, which is bounded by a length cap and a charset check before any
 container code runs.
 
-**Total functional code: 3,121 lines** (7,052 with blanks/comments).
-**Test code: 8,372 lines**, none of which ships.
+**Total functional code: 3,159 lines** (7,145 with blanks/comments).
+**Test code: 8,937 lines**, none of which ships.
 **Vendored, not ours: 1,868 lines** in [`hw/vendor/`](hw/vendor/): the
 BC-UR animated-QR codec, which is Blockchain Commons' by way of
 SeedSigner and is unmodified, and SeedSigner's ST7789 display driver,
@@ -687,7 +687,7 @@ as an import allowlist, so adding one means changing this section,
 | | source |
 |---|---|
 | Raspberry Pi OS Lite 64-bit, trixie | sha256 pinned in `image/PINS` |
-| Bitcoin Core 31.1 | official binary, sha256 pinned, 11 GPG signatures checked out of band |
+| Bitcoin Core 32.1 | official binary, sha256 pinned, 8 GPG signatures checked out of band |
 | Pillow, picamera2, spidev, RPi.GPIO, libzbar0, pip | six `.deb` files, each pinned by **url, sha256 and size** in `image/PINS`. Not apt: see below |
 | qrcode, pyzbar, and their two dependencies | pip, pinned by **sha256** in `image/requirements.txt` and installed with `--require-hashes` |
 | ST7789 driver, BC-UR codec, icon font | vendored in `hw/vendor/`, MIT/BSD/CC-BY |
@@ -715,7 +715,7 @@ say so would be telling you something untrue by omission.
 
 | | pinned by | attested by | reproducible? |
 |---|---|---|---|
-| **Bitcoin Core 31.1** | sha256 | **11 GPG signatures**, keys served by a different host to the binary | **yes**, Core's builds are Guix and bit-for-bit |
+| **Bitcoin Core 32.1** | sha256 | **8 GPG signatures** and 15 guix.sigs attestations, keys served by a different host to the binary | **yes**, Core's builds are Guix and bit-for-bit |
 | Core Signer's own code | git commit | nothing yet | yes, it is text |
 | the four pip wheels | sha256, `--require-hashes` | nothing | no |
 | the six `.deb` files | sha256 + size | nothing | no |

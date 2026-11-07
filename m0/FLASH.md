@@ -57,7 +57,7 @@ On the Pi:
 sudo bash /boot/firmware/coresigner-provision.sh
 ```
 
-This installs Bitcoin Core 31.1 against the hash pinned in `image/PINS`,
+This installs Bitcoin Core 32.1 against the hash pinned in `image/PINS`,
 installs the display, GPIO, camera and QR packages, unpacks Core Signer to
 `/opt/coresigner`, makes the ramdisk datadir, and turns on SPI for the hat. It is
 idempotent. On a Zero 2 W over WiFi it takes about 15 minutes, most of it

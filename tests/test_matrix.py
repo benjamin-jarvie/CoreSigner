@@ -120,9 +120,11 @@ def run_cell(rpc, watch, miner_addr, mode, script, n_inputs, shape):
                       True, wallet=watch)
     psbt = funded["psbt"]
     decoded = rpc.call("decodepsbt", psbt)
-    assert len(decoded["tx"]["vout"]) == want_out, \
-        f"{shape}: {len(decoded['tx']['vout'])} outputs, want {want_out}"
-    assert len(decoded["tx"]["vin"]) == n_inputs
+    # `inputs` and `outputs` hold one map per input and per output in a
+    # PSBT of either version. `tx` exists only in v0, and Core 32 funds v2.
+    assert len(decoded["outputs"]) == want_out, \
+        f"{shape}: {len(decoded['outputs'])} outputs, want {want_out}"
+    assert len(decoded["inputs"]) == n_inputs
 
     # Core Signer review screen + signature (the security boundary).
     review = signer.describe_psbt(rpc, psbt)

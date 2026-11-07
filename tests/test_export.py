@@ -136,9 +136,15 @@ def main():
             # a coordinator that lies about an input amount shows up
             # here. (Devil's advocate on A5, 2026-09-06: the first version
             # of this check was exactly that tautology.)
+            # Core 32 funds a PSBT v2, whose decode has no `tx`: each
+            # input names its own outpoint instead.
+            outpoints = ([(t["txid"], t["vout"]) for t in decoded["tx"]["vin"]]
+                         if "tx" in decoded else
+                         [(i["previous_txid"], i["previous_vout"])
+                          for i in decoded["inputs"]])
             chain_in = Decimal(0)
-            for txin in decoded["tx"]["vin"]:
-                utxo = rpc.call("gettxout", txin["txid"], txin["vout"])
+            for txid, vout in outpoints:
+                utxo = rpc.call("gettxout", txid, vout)
                 chain_in += Decimal(str(utxo["value"]))
             chain_fee = chain_in - out_sum
             if total is None:

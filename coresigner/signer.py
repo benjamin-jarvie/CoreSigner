@@ -61,6 +61,13 @@ _SECRET_RE = re.compile(
     % ("|".join(XPRV_PREFIXES), _WIF_RE))
 
 
+#: An extended private key inside a descriptor. The lookbehind is there
+#: because a tpub's own base58 can spell `tprv`, and a match must not
+#: start inside another key.
+_XPRV_RE = re.compile(r"(?<![1-9A-HJ-NP-Za-km-z])(?:%s)[1-9A-HJ-NP-Za-km-z]+"
+                      % "|".join(XPRV_PREFIXES))
+
+
 def redact(text: str) -> str:
     """Strip key material out of text bound for a screen, a log or the
     journal. This is string handling, not key handling: nothing here
@@ -786,6 +793,61 @@ _OWNER_DROPS = frozenset((
 ))
 
 
+class UnreadablePsbt(RuntimeError):
+    """decodepsbt answered in a shape the review screen cannot read.
+
+    A RuntimeError, so any flow that shows Core's refusals shows this one.
+    `Session._key_for` and `Session._reviewable` catch it first and refuse
+    on screen, and nothing is signed (bb-orchestrator ruling, 2026-11-04).
+    """
+
+
+#: BIP 370: an input with no PSBT_IN_SEQUENCE has nSequence 0xffffffff.
+_ABSENT_SEQUENCE = 0xffffffff
+
+
+def _review_shape(decoded: dict) -> "tuple[list[dict], list[dict]]":
+    """The outputs and the inputs' sequences, out of either PSBT version.
+
+    A v0 PSBT carries the unsigned transaction, and Core decodes it as
+    `tx`. A v2 PSBT has none (BIP 370): Core puts each output's value and
+    address on `outputs` as `amount` and `script`, and each input's
+    `sequence` on `inputs`. Core 32.0 started accepting v2 and
+    walletcreatefundedpsbt makes it by default, so a Core coordinator
+    sends this shape. Both readings take Core's values as Core wrote
+    them.
+
+    An input with no PSBT_IN_SEQUENCE has no `sequence` in Core's decode
+    (measured on 32.1, 2026-11-04). It becomes 0xffffffff here, as BIP 370
+    reads it, so `_spend_lock` sees the input and never skips it.
+
+    Anything else raises UnreadablePsbt, naming what was missing, because
+    a review built on a guess about the shape is the one screen this
+    device must not show.
+    """
+    try:
+        inputs = decoded["inputs"]
+        if "tx" in decoded:
+            vout = [(v["scriptPubKey"], v["value"])
+                    for v in decoded["tx"]["vout"]]
+            vin = decoded["tx"].get("vin", [])
+        elif decoded.get("psbt_version") == 2:
+            vout = [(o["script"], o["amount"]) for o in decoded["outputs"]]
+            vin = [{"sequence": i.get("sequence", _ABSENT_SEQUENCE)}
+                   for i in inputs]
+        else:
+            raise UnreadablePsbt(
+                f"no 'tx', and PSBT version "
+                f"{decoded.get('psbt_version')!r} is not 2")
+        outputs = [{"address": script.get("address", "(non-standard)"),
+                    "amount_btc": amount} for script, amount in vout]
+    except KeyError as exc:
+        raise UnreadablePsbt(f"Core's decode has no {exc}") from None
+    except (TypeError, AttributeError):
+        raise UnreadablePsbt("Core's decode is not in a known shape") from None
+    return outputs, vin
+
+
 def describe_psbt(rpc: "Rpc", psbt_b64: str) -> dict:
     """Everything the review screen shows. All numbers are Core's.
 
@@ -812,15 +874,14 @@ def describe_psbt(rpc: "Rpc", psbt_b64: str) -> dict:
     `input_total_btc` of None used to mean and what makes the device
     refuse the transaction. One condition now instead of two that could
     disagree.
+
+    Raises UnreadablePsbt when Core's decode is in neither PSBT version's
+    shape; see `_review_shape`.
     """
     decoded = rpc.call("decodepsbt", psbt_b64, stdin=True,
                        drop=_REVIEW_DROPS)
     analysis = rpc.call("analyzepsbt", psbt_b64, stdin=True)
-    outputs = [
-        {"address": vout["scriptPubKey"].get("address", "(non-standard)"),
-         "amount_btc": vout["value"]}
-        for vout in decoded["tx"]["vout"]
-    ]
+    outputs, vin = _review_shape(decoded)
     locks = _timelocks(decoded["inputs"])
     fee = decoded.get("fee")
     input_total = None
@@ -837,7 +898,7 @@ def describe_psbt(rpc: "Rpc", psbt_b64: str) -> dict:
         "quorum": _quorum(decoded["inputs"]),
         "cosigners": _cosigners(decoded["inputs"]),
         "timelocks": locks,
-        "spend_lock": _spend_lock(decoded["tx"].get("vin", []), locks),
+        "spend_lock": _spend_lock(vin, locks),
     }
 
 
@@ -968,12 +1029,19 @@ def owners(rpc: "Rpc", psbt_b64: str) -> set[str]:
     decoded = rpc.call("decodepsbt", psbt_b64, stdin=True,
                        drop=_OWNER_DROPS)
     found = set()
-    for txin in decoded["inputs"]:
-        for field in ("bip32_derivs", "taproot_bip32_derivs"):
-            for deriv in txin.get(field, []):
-                xfp = deriv.get("master_fingerprint")
-                if xfp:
-                    found.add(xfp.lower())
+    try:
+        for txin in decoded["inputs"]:
+            for field in ("bip32_derivs", "taproot_bip32_derivs"):
+                for deriv in txin.get(field, []):
+                    xfp = deriv.get("master_fingerprint")
+                    if xfp:
+                        found.add(xfp.lower())
+    except KeyError as exc:
+        # This decode comes before the review's own, so it fails closed
+        # the same way and with the same words.
+        raise UnreadablePsbt(f"Core's decode has no {exc}") from None
+    except (TypeError, AttributeError):
+        raise UnreadablePsbt("Core's decode is not in a known shape") from None
     return found
 
 
@@ -1151,29 +1219,24 @@ def master_xprv(rpc: "Rpc", wallet: str = WALLET) -> str:
     Core wrote. This is the paper backup (ticket 07): Core's own string,
     nothing of ours between Core and the page.
 
-    THE ONE-MASTER CHECK IS WHAT MAKES THE PARSE SAFE. "After the last
-    `(`" finds the innermost key, which is right for `wpkh(k/...)` and for
-    `sh(wpkh(k/...))`, and would find the wrong key in a descriptor whose
-    innermost `(` belonged to a script leaf rather than to the key, such
-    as `tr(k,pk(other))`. Core 31.1 refuses every such shape with a
-    private key, tested 2026-09-08, so Core Signer cannot hold one. If a future
-    Core accepted one, the eight descriptors would disagree about the
-    master and this raises. It shows the right key or no key; there is no
-    shape that makes it show a wrong one silently.
+    A PRIVATE KEY OR NO KEY, NEVER A PUBLIC ONE. This used to take the key
+    after the last `(`, because a test on 2026-09-08 found Core refusing
+    every descriptor where that is the wrong key. Core 31.1 and 32.1 both accept
+    a scanned `tr(k,pk(other))` with the warning "Not all private keys
+    provided" (measured 2026-11-05), and the last `(` there belongs to the
+    script leaf, so the backup showed the other party's tpub (ISSUES E-9).
+    So every key expression is read, only an extended private key counts,
+    and exactly one distinct one across all the descriptors is the backup.
+    None, or more than one, raises, and Backup key refuses.
     """
     descs = rpc.call("listdescriptors", True, wallet=wallet)["descriptors"]
-    masters = set()
-    for d in descs:
-        text = d["desc"]
-        # innermost key expression: text after the LAST '(' up to '/' or ')'
-        key = text[text.rindex("(") + 1:]
-        for stop in "/)":
-            if stop in key:
-                key = key[: key.index(stop)]
-        masters.add(key)
+    # The checksum goes first: its alphabet can spell `tprv` after a 0,
+    # which base58 does not have, and that reads as a second key.
+    masters = {key for d in descs
+               for key in _XPRV_RE.findall(d["desc"].split("#")[0])}
     if len(masters) != 1:
         raise RuntimeError(
-            f"expected one master key across descriptors, got {len(masters)}")
+            f"expected one master private key, found {len(masters)}")
     return masters.pop()
 
 

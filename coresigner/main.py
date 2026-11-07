@@ -1313,7 +1313,13 @@ class Session:
         check later can come back to Backup key and do it then.
         """
         label = f"KEY  {(xfp or '').upper()}"
-        xprv = signer.master_xprv(self.rpc, wallet=name)
+        try:
+            xprv = signer.master_xprv(self.rpc, wallet=name)
+        except RuntimeError as exc:
+            # No single private key to write down, so no page shows a key
+            # at all (ISSUES E-9).
+            self._hold(f"Cannot back up: {exc}")
+            return False
         outcome = self._show_backup(xprv, label)
         if outcome is None:
             return False
@@ -2347,7 +2353,11 @@ class Session:
         if not self.keys:
             self._hold("Load a key first")
             return None
-        owners = signer.owners(self.rpc, psbt)
+        try:
+            owners = signer.owners(self.rpc, psbt)
+        except signer.UnreadablePsbt as exc:
+            self._hold(f"Cannot review: {exc}")
+            return None
         matches = [k for k in self.keys if k.xfp in owners]
         if owners and not matches:
             self.display.show(screens.result(
@@ -2370,7 +2380,9 @@ class Session:
         wallet = self._key_for(psbt)
         if wallet is None:
             return TO_HOME
-        info = signer.describe_psbt(self.rpc, psbt)
+        info = self._reviewable(psbt)
+        if info is None:
+            return TO_HOME
         # A quorum costs more per input, so it gets its own ceiling
         # rather than one conservative number for everything, which would
         # refuse ordinary batches this board is measured signing (Ben,
@@ -2389,14 +2401,6 @@ class Session:
                 self.w, self.h, ok=False,
                 detail=f"{info['input_count']} inputs; this board signs "
                        f"up to {cap}"))
-            self.buttons.read()
-            return TO_HOME
-        if info["fee_btc"] is None:
-            # Missing input data: refuse loudly instead of crashing (a fee
-            # the device cannot show is a transaction it must not sign).
-            self.display.show(screens.result(
-                self.w, self.h, ok=False,
-                detail="PSBT lacks input data; fee unknown; refused"))
             self.buttons.read()
             return TO_HOME
         # M1 decision 2 and M3 decisions 2 and 3: the review screen says
@@ -2436,6 +2440,32 @@ class Session:
                     self.w, self.h, ok=False, detail="rejected by user"))
                 self.buttons.read()
                 return TO_HOME
+
+    def _reviewable(self, psbt):
+        """Core's review of the transaction, or None after a refusal.
+
+        Both refusals here are about what Core's decode can support, and
+        both send the person home with nothing signed.
+        """
+        try:
+            info = signer.describe_psbt(self.rpc, psbt)
+        except signer.UnreadablePsbt as exc:
+            # Fail closed. Core 32 began decoding PSBT v2 in a second
+            # shape, and the first one to arrive raised a KeyError here,
+            # which ended the process with the scan screen frozen on the
+            # panel. A shape the review cannot read is a transaction the
+            # device must not sign, so say what is missing and go home.
+            self._hold(f"Cannot review: {exc}")
+            return None
+        if info["fee_btc"] is None:
+            # Missing input data: refuse loudly instead of crashing (a fee
+            # the device cannot show is a transaction it must not sign).
+            self.display.show(screens.result(
+                self.w, self.h, ok=False,
+                detail="PSBT lacks input data; fee unknown; refused"))
+            self.buttons.read()
+            return None
+        return info
 
     def _sign_and_deliver(self, psbt, source, wallet):
         stop = self._busy("signing in Core…")

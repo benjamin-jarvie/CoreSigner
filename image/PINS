@@ -12,7 +12,7 @@
 # the .sha256 the Foundation publishes beside the file.
 #
 # It is a weaker pin than CORE_SHA256 and the difference is worth
-# knowing. Core's hash is attested by eleven GPG signatures from keys
+# knowing. Core's hash is attested by eight GPG signatures from keys
 # served by a different host. This one has no signature at all: the
 # image and its hash come from the same server, so it proves you got
 # what we got and proves nothing about what that is. Raspberry Pi OS
@@ -34,28 +34,40 @@ IOSEVKA_URL="https://github.com/be5invis/Iosevka/releases/download/v34.8.1/PkgTT
 IOSEVKA_TTF="IosevkaCurly-SemiBold.ttf"
 IOSEVKA_TTF_SHA256="cb0fad8ef725e3232911eb90cfb1a3d704937ef56b7f8cb43b02b8432d1ea1eb"
 
-CORE_VERSION="31.1"
-CORE_TARBALL="bitcoin-31.1-aarch64-linux-gnu.tar.gz"
-CORE_URL="https://bitcoincore.org/bin/bitcoin-core-31.1/bitcoin-31.1-aarch64-linux-gnu.tar.gz"
-# Verified 2026-09-03 on the Mac, out of band from bitcoincore.org:
-#   11 of 11 GPG signatures on SHA256SUMS good, 0 bad, 0 missing keys.
+CORE_VERSION="32.1"
+CORE_TARBALL="bitcoin-32.1-aarch64-linux-gnu.tar.gz"
+CORE_URL="https://bitcoincore.org/bin/bitcoin-core-32.1/bitcoin-32.1-aarch64-linux-gnu.tar.gz"
+# Verified 2026-11-04 on the Mac, out of band from bitcoincore.org:
+#   8 of 8 GPG signatures on SHA256SUMS good, 0 bad, 0 missing keys:
+#   achow101, benthecarman, fanquake, guggero, pinheadmz, sedited,
+#   Sjors and willcl-ark.
 #   Signing keys came from the guix.sigs repo (builder-keys/), a
 #   different host to the one serving the binary.
-#   achow101, fanquake, Sjors and hebasto each attest this same hash
-#   in their own noncodesigned.SHA256SUMS for 31.1.
-CORE_SHA256="dcf1873f2208ba4f962f3398d47e154c39c0084be8f4553e05c940d0ace3d004"
+#   15 guix.sigs builders attest this same hash in their own
+#   noncodesigned.SHA256SUMS for 32.1, and all 15 of those files carry
+#   a good signature (guix.sigs at 929be190).
+#
+# THE GATE FOR A NEW CORE VERSION, from 2026-11-04. 31.1 carried 11
+# signatures and the rule was "no fewer keys than the last version".
+# 32.1 had 8 a week after release, because builders add theirs to
+# SHA256SUMS.asc over the following weeks, so that rule would hold back
+# every fresh release on a count that is still rising. The rule is now:
+#   0 bad signatures, at least 8 good, and every guix.sigs attestation
+#   for the version names the same hash as CORE_SHA256.
+# Record the true counts here with the date. Never a count from an
+# earlier version.
+CORE_SHA256="7ed37c7373eb6aa3e3f72842596a1afeba1b223717033cade9842b25773e1922"
 # The two binaries INSIDE that tarball, so an installed device can be
-# re-checked without downloading 82MB again. Extracted from the tarball
-# above after it matched CORE_SHA256, on 2026-09-06. This is the hash
+# re-checked without downloading 89MB again. Extracted from the tarball
+# above after it matched CORE_SHA256, on 2026-11-04. This is the hash
 # image/verify-install.sh compares against on the board; the tarball hash
 # can only be checked at install time, which audit A7 pointed out is the
 # one moment nobody is watching.
-CORE_BIN_SHA256="1b279e038691c10e30d9c99a071ff967439020c4352e8ea3b156fb6b03751f83"
-CLI_BIN_SHA256="815c0969dabe4b67d180f3e0c597c995ca03fd3a65ff2b2d1b1223109f6df589"
-# Re-verified 2026-09-08 by downloading CORE_URL again on the dev machine:
-# the tarball and both extracted binaries matched all three hashes above.
-# bitcoind is 16,451,368 bytes and bitcoin-cli 2,561,232, both already
-# stripped. Those two figures are what PLAN A-12b's arithmetic rests on.
+CORE_BIN_SHA256="b128ee1d90f4517433d094925ac6a2e7f57b0cb354e9dc1c2c44cf0aa09716bd"
+CLI_BIN_SHA256="e6157b70d5a3934494b3f18cc66ca6eb38227757427618a4358db7c4a08aa784"
+# bitcoind is 16,315,696 bytes and bitcoin-cli 7,476,512, both already
+# stripped (31.1: 16,451,368 and 2,561,232). Those two figures are what
+# PLAN A-12b's arithmetic rests on.
 CORESIGNER_COMMIT="HEAD"                             # pin to a tag for release images
 # pip's packages live in image/requirements.txt since 2026-09-08, pinned
 # by sha256 and installed with --require-hashes. A version alone stops an

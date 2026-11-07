@@ -69,8 +69,8 @@
   |---|---|
   | SeedSigner 0.8.7 pi02w, whole card | 33MB (29.5MB `zImage`, 3.7MB firmware) |
   | that `zImage`, decompressed (kernel **and** initramfs) | 36.7MB |
-  | `bitcoind` 31.1 aarch64, stripped | **16.4MB** |
-  | `bitcoin-cli` | 2.6MB |
+  | `bitcoind` 32.1 aarch64, stripped | **16.3MB** |
+  | `bitcoin-cli` 32.1 | 7.5MB |
   | Raspberry Pi OS Lite, resident, on the board today | **~168MB** |
 
   That last figure is the one that decides it, and it was already in
@@ -88,8 +88,12 @@
   purpose-built image at 40 to 90MB resident beats a general-purpose
   distribution's 168MB working set by more than the reclaim advantage is
   worth. SeedSigner already carries Python, numpy, picamera and pyzbar,
-  which is most of what Core Signer needs; adding 19MB of Core binaries to
+  which is most of what Core Signer needs; adding 24MB of Core binaries to
   their 37MB is not what breaks a 512MB board.
+
+  The two Core rows were 16.4MB and 2.6MB for 31.1, so the sum here was
+  19MB. Re-measured from the 32.1 tarball on 2026-11-04: `bitcoin-cli`
+  grew to 7.5MB, and the sum moved by 5MB. The conclusion does not move.
 
   What would confirm it: build once and read MemAvailable on the same
   250-input run. Until then this is arithmetic on measured parts, which
@@ -431,9 +435,9 @@
   too broad. Two questions, one answer each.
 
   The CODE is verifiable. Core's builds are reproducible, so the binary
-  corresponds to source anyone can read. Eleven signatures on the 31.1
-  hashes were checked out of band on 2026-09-03, from a different host to
-  the one serving the binary. The hash is pinned in image/PINS and
+  corresponds to source anyone can read. Eight signatures on the 32.1
+  hashes were checked out of band on 2026-11-04, from a different host to
+  the one serving the binary (31.1: eleven, on 2026-09-03). The hash is pinned in image/PINS and
   provisioning refuses to install without it. The M3 release image gets the
   same treatment for the whole card.
 

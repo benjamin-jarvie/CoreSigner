@@ -138,6 +138,29 @@ def prop_no_key_reaches_the_panel():
         return coresigner_main.Session(Blind(), hal.DevButtons("a"), NoRpc(),
                                   animate=False)
 
+    class Decodes(NoRpc):
+        """Core's decode quoting the secret back, where the review's
+        refusal repeats the field it cannot read."""
+
+        def __init__(self, secret):
+            self.secret = secret
+
+        def call(self, method, *a, **k):
+            if method == "decodepsbt":
+                return {"psbt_version": self.secret, "inputs": [{}],
+                        "outputs": [{}]}
+            return ""
+
+    def review(secret):
+        sess = coresigner_main.Session(Blind(), hal.DevButtons("a"),
+                                       Decodes(secret), animate=False)
+        sess._refresh_keys = lambda: setattr(
+            sess, "keys", [sg.Key("coresigner", "73c5da0a")])
+        try:
+            sess.state_review("cHNidP8B", None)
+        except hal.ScriptExhausted:
+            pass
+
     seen = []
     real = scr.result
     scr.result = lambda w, h, **kw: seen.append(kw.get("detail", "")) or "r"
@@ -153,6 +176,9 @@ def prop_no_key_reaches_the_panel():
                 "_show_core_error":
                     lambda s: session()._show_core_error(
                         RuntimeError(f"importdescriptors: '{s}' refused")),
+                # The review's refusal once drew its own screen, around
+                # _hold and so around the redactor.
+                "the review refusal": review,
             }
             for label, run in funnels.items():
                 seen.clear()
@@ -625,6 +651,151 @@ def prop_too_many_inputs_is_refused_not_signed():
                 "the other shape's ceiling")
 
 
+def prop_an_unreadable_decode_is_refused_not_signed():
+    """A decodepsbt answer the review cannot read is refused on screen.
+
+    Core 32.0 began accepting PSBT v2, and its decode of one has no `tx`.
+    `describe_psbt` read `decoded["tx"]["vout"]`, so the first v2
+    transaction raised a KeyError, which is not in `Session.HANDLED`, and
+    the process died with the panel frozen on the scan screen. Reading
+    the second shape fixes v2. It does not fix the next shape, so every
+    answer that is neither must become a refusal that names what is
+    missing, and nothing may be signed (bb-orchestrator ruling,
+    2026-11-04).
+
+    Each case removes one field the review needs from an answer in the
+    shape Core gives. These are literals, so the shape is the author's;
+    tests/test_multisig_review.py checks both shapes against a real Core
+    decode. The first case is that answer whole, which proves the
+    fake reaches the review screen, so a refusal below means the field
+    and not the fake.
+    """
+    import hal
+    import main as coresigner_main
+    import screens
+
+    class Painted:
+        width, height = 320, 240
+
+        def __init__(self):
+            self.shown = []
+
+        def show(self, image, sensitive=False):
+            self.shown.append(image)
+
+    def v0():
+        return {"psbt_version": 0,
+                "tx": {"vout": [{"value": Decimal("0.5"),
+                                 "scriptPubKey": {"address": "bcrt1q"}}],
+                       "vin": [{"sequence": 0xfffffffd}]},
+                "inputs": [{}], "outputs": [{}], "fee": Decimal("0.0001")}
+
+    def v2():
+        return {"psbt_version": 2,
+                "inputs": [{"sequence": 0xfffffffd}],
+                "outputs": [{"amount": Decimal("0.5"),
+                             "script": {"address": "bcrt1q"}}],
+                "fee": Decimal("0.0001")}
+
+    def without(answer, *path):
+        node = answer
+        for step in path[:-1]:
+            node = node[step]
+        del node[path[-1]]
+        return answer
+
+    # The third column is the word the refusal must contain, so the
+    # screen names the problem rather than saying only that there is one.
+    cases = [
+        ("a whole v0 answer", v0(), None),
+        ("a whole v2 answer", v2(), None),
+        ("v0 with no tx and no v2 version", without(v0(), "tx"), "'tx'"),
+        ("v0 with no vout", without(v0(), "tx", "vout"), "'vout'"),
+        ("v0 with no output value",
+         without(v0(), "tx", "vout", 0, "value"), "'value'"),
+        ("v0 with no scriptPubKey",
+         without(v0(), "tx", "vout", 0, "scriptPubKey"), "'scriptPubKey'"),
+        ("v2 with no outputs", without(v2(), "outputs"), "'outputs'"),
+        ("v2 with no output amount",
+         without(v2(), "outputs", 0, "amount"), "'amount'"),
+        ("v2 with no output script",
+         without(v2(), "outputs", 0, "script"), "'script'"),
+        ("v2 with no inputs", without(v2(), "inputs"), "'inputs'"),
+        ("no version and no tx", without(v2(), "psbt_version"), "'tx'"),
+        ("a version that is neither", {**v2(), "psbt_version": 3}, "3"),
+    ]
+    for name, answer, names in cases:
+        want_refusal = names is not None
+        called = []
+
+        class Answers:
+            chain = "regtest"
+
+            def call(self, method, *params, wallet=None, stdin=False,
+                     drop=(), answer=answer, called=called):
+                called.append(method)
+                if method == "decodepsbt":
+                    return answer
+                if method == "analyzepsbt":
+                    return {"next": "signer"}
+                if method == "walletprocesspsbt":
+                    return {"psbt": base64.b64encode(b"psbt\xffsigned").decode(),
+                            "complete": True}
+                return ""
+
+        disp = Painted()
+        # C rejects on the review screen, so a readable answer ends on
+        # "rejected by user" and an unreadable one never reaches it.
+        sess = coresigner_main.Session(disp, hal.DevButtons("c"),
+                                       rpc=Answers(), animate=False,
+                                       on_device=False)
+        # The real _key_for runs, because it decodes the PSBT before the
+        # review does, and a crash there is the same crash (TESTING.md
+        # rule 3). Only the key list is given, as one loaded key.
+        sess._refresh_keys = lambda sess=sess: setattr(
+            sess, "keys", [signer.Key("coresigner", "73c5da0a")])
+        try:
+            sess.state_review("cHNidP8B", None)
+        except hal.ScriptExhausted:
+            pass
+        whys = _unreadable_why(answer)
+        refusals = [f for f in disp.shown
+                    if any(f.tobytes() == screens.result(
+                        320, 240, ok=False,
+                        detail=f"Cannot review: {why}"[:coresigner_main.MESSAGE_CHARS]
+                    ).tobytes() for why in whys)]
+        if "walletprocesspsbt" in called:
+            raise AssertionError(f"{name}: the device signed it")
+        if want_refusal and not refusals:
+            raise AssertionError(
+                f"{name}: no refusal screen naming the problem was drawn")
+        if want_refusal and not any(names in why for why in whys):
+            raise AssertionError(
+                f"{name}: the refusal {whys!r} does not name {names}")
+        if not want_refusal and refusals:
+            raise AssertionError(
+                f"{name}: an answer Core really gives was refused")
+        rejected = screens.result(320, 240, ok=False,
+                                  detail="rejected by user").tobytes()
+        if not want_refusal and not any(f.tobytes() == rejected
+                                        for f in disp.shown):
+            raise AssertionError(f"{name}: the review screen was never reached")
+
+
+def _unreadable_why(answer):
+    """What describe_psbt says about `answer`, or nothing if it reads it."""
+    class One:
+        def call(self, method, *params, **kw):
+            return answer if method == "decodepsbt" else {"next": "signer"}
+    try:
+        signer.describe_psbt(One(), "cHNidP8B")
+    except signer.UnreadablePsbt as exc:
+        return [str(exc)]
+    except Exception:  # noqa: BLE001 - the caller reports it as no refusal
+        return []
+    return []
+
+
 def prop_a_failing_stick_does_not_lose_a_signature():
     """Core has signed. If the stick then fails, the screen delivers it.
 
@@ -735,6 +906,8 @@ def main():
          prop_too_many_inputs_is_refused_not_signed),
         ("a failing stick does not lose a signature",
          prop_a_failing_stick_does_not_lose_a_signature),
+        ("an unreadable decode is refused, not signed",
+         prop_an_unreadable_decode_is_refused_not_signed),
     ]
     failed = 0
     for name, fn in checks:
